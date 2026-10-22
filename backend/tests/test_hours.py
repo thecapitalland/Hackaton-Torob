@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 
 from app.tools import catalog
 from app.tools.hours import open_status
+from app.tools.markets import market_hours_text
 
 MEHRISA = "shop_13336f1a0d2ec0b16bbd60aa"  # مهریسا نوین - پاساژ علاالدین
 AVAN = "shop_60e835a590a4a652ce0ad6d9"  # آوان آران - hours unknown
@@ -76,3 +78,39 @@ def test_price_age_days():
 
     age = price_age_days("2026-09-14T08:57:27.401253+00:00", THURSDAY_1500)
     assert age is not None and age > 30
+
+
+def test_open_text_uses_persian_digits(catalog_path):
+    shop = catalog.shop_by_id(MEHRISA)
+    status, text = open_status(shop["weekly_hours"], THURSDAY_1500)
+    assert status == "open"
+    assert text == "باز است تا ۲۰:۳۰"
+    assert not re.search(r"[0-9]", text)
+
+
+def test_market_hours_are_translated_and_localized():
+    market = {
+        "hours_external": {
+            "alaeddin": "Sat–Thu 09:00-21:00; Fri ~11:00-16/18 (sources differ)",
+            "charsou": "daily ~10:00-22:00",
+            "fri": "closed",
+        }
+    }
+    text = market_hours_text(market)
+    assert "شنبه تا پنجشنبه" in text
+    assert "جمعه" in text
+    assert "هر روز" in text
+    assert not re.search(r"[A-Za-z0-9]", text), text
+
+
+def test_paytakht_hours_have_no_english_left():
+    from app.data_static import load_markets
+
+    paytakht = next(
+        market
+        for market in load_markets()["markets"]
+        if market["market_id"] == "paytakht"
+    )
+    text = market_hours_text(paytakht)
+    assert "۰۹:۳۰" in text
+    assert not re.search(r"[A-Za-z0-9]", text), text

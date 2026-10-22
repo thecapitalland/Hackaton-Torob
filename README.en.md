@@ -10,8 +10,9 @@ shop and a nearby cafe.
 
 ## ✨ Highlights
 
-- **Every product, shop and price comes from the real Torob dataset** (225,903 products · 331,506 offers ·
-  6,476 shops → a slim `data/catalog.db`). The LLM never invents an item, a shop or a price.
+- **Every product, shop and price comes from the real Torob dataset** (raw: 225,903 products · 331,506 offers ·
+  6,476 shops; slim catalog: **40,120 products · 115,185 offers · 2,751 shops**). The LLM never invents an item,
+  a shop or a price.
 - **Specialty market card**: “🏬 The main market in Tehran for this category is X”, with in-data counts
   (e.g. 157 of 244 headphone shops are inside Jomhouri–Hafez). Opening hours are external facts and are
   labelled «اطلاعات عمومی».
@@ -37,22 +38,38 @@ Works with **no API keys at all** (`LLM_MODE=off`, rule-based):
 
 ```bash
 # 1) venv + deps
-python -m venv .venv && . .venv/bin/activate     # Windows: .venv\Scripts\activate
+python3 -m venv .venv && source .venv/bin/activate
 pip install -r backend/requirements.txt
 
 # 2) build the slim catalog + markets data from the official CSVs
+#    required inputs: shops.csv, products.csv, offers.csv
 python backend/scripts/build_catalog.py --src /path/to/torob-dataset --out data/catalog.db
 python backend/scripts/build_markets.py --catalog data/catalog.db --out data/markets.json
 
-# 3) build the SPA (FastAPI serves static/ as-is in production)
-cd frontend && npm install && npm run build && cd ..
+# 3) build the SPA - vite writes directly to ../static, where FastAPI serves it
+(cd frontend && npm ci && npm run build)
 
 # 4) run rule-based + repeatable demo
-LLM_MODE=off DEMO_MODE=1 DEMO_NOW=2026-10-22T15:00:00+03:30 \
+PYTHONIOENCODING=utf-8 LLM_MODE=off DEMO_MODE=1 DEMO_NOW=2026-10-22T15:00:00+03:30 \
   uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
 ```
 
 → `http://127.0.0.1:8000/`
+
+Windows: use `python -m venv .venv`, `.venv\Scripts\Activate.ps1`, then set
+`$env:PYTHONIOENCODING="utf-8"; $env:LLM_MODE="off"; $env:DEMO_MODE="1"; $env:DEMO_NOW="2026-10-22T15:00:00+03:30"`
+before the same uvicorn command.
+
+Reproducibility notes:
+
+- `vite.config.ts` sets `build.outDir` to `../static` with `emptyOutDir: true`, so a plain
+  `npm run build` lands exactly where the backend serves it. `STATIC_DIR` falls back to
+  `frontend/dist` only when `static/` is missing (older builds).
+- Expected catalog counts after slimming: **40,120 products / 115,185 offers / 2,751 shops**
+  (raw dataset: 225,903 / 331,506 / 6,476). The reduction is intentional: outlier prices and
+  duplicate offers are dropped and the SQLite file must stay under 150 MB.
+- `build_markets.py` **overwrites** the committed `data/markets.json`; edit the curated
+  `MARKET_DEFINITIONS` / `EXTERNAL_MARKETS` in the script, not just the JSON file.
 
 Later, add `BOXAPI_API_KEY` (+ optional `NESHAN_API_KEY`) to `.env`, run
 `python backend/scripts/smoke_llm.py` once to pick a working base_url/model,
@@ -74,7 +91,12 @@ Health check: `curl http://localhost:8000/api/health`
 
 ```bash
 pytest backend/tests -q
+cd frontend && npm test     # pure helpers: prices, hours, icons, market filter, trip line
 ```
+
+The backend suite covers the clarify loop (location/budget answers and «مهم نیست» skips),
+laptop tokenization, out-of-catalog alternatives, seller-floor consistency and the full
+approval → trip journey with `LLM_MODE=off`.
 
 ## ☁️ Deploy (Liara, Docker)
 

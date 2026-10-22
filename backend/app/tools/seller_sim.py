@@ -8,6 +8,7 @@ rendered in the UI with the «پاسخ شبیه‌سازی‌شده» label.
 from __future__ import annotations
 
 import hashlib
+import re
 
 from ..data_static import load_seller_replies
 from ..normalize import fa_digits
@@ -15,6 +16,8 @@ from ..normalize import fa_digits
 PRICE_CHANGE_FACTOR = 1.065
 BASE_DELAY_MS = 2500
 DELAY_STEP_MS = 1700
+# «... هستیم، طبقه منفی یک.» -> the floor part is replaced with the real one
+FLOOR_RE = re.compile(r"[،,]\s*طبقه[^.!؟\n]*")
 
 
 def price_to_words(value: int | None) -> str:
@@ -65,8 +68,15 @@ def seller_reply(shop_id: str, offer_price: int, seed: int = 42) -> str | None:
     return seller_reply_detail(shop_id, offer_price, index=0)["text"]
 
 
-def seller_reply_detail(shop_id: str, offer_price: int, index: int = 0) -> dict:
-    """Full scripted answer: status, text and the UI typing delay."""
+def seller_reply_detail(
+    shop_id: str, offer_price: int, index: int = 0, floor: str | None = None
+) -> dict:
+    """Full scripted answer: status, text and the UI typing delay.
+
+    ``floor`` is the shop's real floor from the catalog; it replaces the
+    hardcoded «طبقه منفی یک» of the template so the simulated seller never
+    sends the user to a different floor than the shop card.
+    """
     data = load_seller_replies()
     templates = data.get("templates") or {}
     outcome = assignment_for(shop_id)
@@ -75,6 +85,8 @@ def seller_reply_detail(shop_id: str, offer_price: int, index: int = 0) -> dict:
         text = text.replace("{price}", price_to_words(offer_price)).replace(
             "{price_up}", price_to_words(price_up(offer_price))
         )
+        replacement = f"، طبقه {fa_digits(str(floor).strip())}" if floor else ""
+        text = FLOOR_RE.sub(replacement, text)
     else:
         text = None
 

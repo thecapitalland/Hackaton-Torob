@@ -10,8 +10,9 @@ venv/
 node_modules/
 dist/
 .vite/
+.npm-cache/
 
-# built SPA (Dockerfile rebuilds it from frontend/dist)
+# built SPA (vite writes ../static; Dockerfile rebuilds it)
 static/
 
 # data (catalog.db is rebuilt with backend/scripts/build_catalog.py)

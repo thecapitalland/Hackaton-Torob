@@ -92,7 +92,7 @@ export function StoreCard({
             <h4 className="truncate text-[14px] font-bold">{shop.name}</h4>
             <div className="shrink-0 text-left">
               <p className="text-[13.5px] font-bold text-brand-red">
-                {faDigits(shop.price)} تومان
+                {formatPrice(shop.price)} تومان
               </p>
               {cheapest ? (
                 <p className="text-[10.5px] font-bold text-brand-green">{copy.stores.cheapest}</p>
@@ -159,6 +159,8 @@ export function StoreCard({
 export function StoresSection({
   shops,
   market,
+  marketFilter,
+  onClearMarketFilter,
   userLocation,
   selected,
   routes,
@@ -169,6 +171,8 @@ export function StoresSection({
 }: {
   shops: Shop[];
   market?: Market | null;
+  marketFilter?: Market | null;
+  onClearMarketFilter?: () => void;
   userLocation?: SlotLocation | null;
   selected: string[];
   routes?: Record<string, RouteInfo>;
@@ -210,8 +214,9 @@ export function StoresSection({
     <section className="space-y-3">
       <div className="flex items-center justify-between px-1">
         <h2 className="text-[16px] font-bold">{copy.stores.title}</h2>
-        {/* list/map toggle is unnecessary from 1280px up: the side pane is always visible */}
-        <div className="hidden flex rounded-full border border-brand-border bg-white p-1 md:flex xl:hidden">
+        {/* list/map toggle is unnecessary from 1280px up: the side pane is always visible.
+            It stays visible below 768px too: there it opens the map bottom sheet. */}
+        <div className="flex rounded-full border border-brand-border bg-white p-1 xl:hidden">
           {(["list", "map"] as const).map((key) => (
             <button
               key={key}
@@ -235,6 +240,11 @@ export function StoresSection({
       </div>
 
       <div className="no-scrollbar flex gap-2 overflow-x-auto px-1">
+        {marketFilter ? (
+          <Chip size="sm" tone="success" onClick={onClearMarketFilter}>
+            🏬 فقط {marketFilter.name_fa} ✕
+          </Chip>
+        ) : null}
         {SORTS.map((item) => (
           <Chip key={item.key} active={sort === item.key} onClick={() => onSort(item.key)} size="sm">
             {item.label}
@@ -276,7 +286,7 @@ export function StoresSection({
           </div>
         ) : (
           <p className="rounded-card border border-brand-border bg-white p-4 text-[13px] text-brand-muted">
-            {copy.stores.empty}
+            {marketFilter ? copy.stores.emptyInMarket : copy.stores.empty}
           </p>
         )
       ) : (

@@ -1,12 +1,26 @@
 import { motion } from "framer-motion";
 import { copy } from "../copy.fa";
 import { faDigits, formatDistance } from "../format";
+import { buildTripLine } from "../lib/trip";
 import type { RouteInfo, Trip } from "../types";
 import { MapView } from "./MapView";
 import { DirectionsLinks } from "./DirectionsLinks";
 
 export function TripPlan({ trip, route }: { trip: Trip; route?: RouteInfo | null }) {
   const first = trip.stops?.[0];
+  const mapStops = (trip.stops ?? []).filter(
+    (stop) =>
+      stop.lat !== null && stop.lat !== undefined && stop.lon !== null && stop.lon !== undefined,
+  );
+  const startPoint: [number, number] | null =
+    trip.start?.lat !== null &&
+    trip.start?.lat !== undefined &&
+    trip.start?.lon !== null &&
+    trip.start?.lon !== undefined
+      ? [trip.start.lat, trip.start.lon]
+      : mapStops.length
+        ? [mapStops[0].lat as number, mapStops[0].lon as number]
+        : null;
   const shareText = encodeURIComponent(
     `برنامهٔ خرید من با تربچه: ${trip.stops
       .map((stop) => `${stop.order}. ${stop.name}`)
@@ -74,26 +88,38 @@ export function TripPlan({ trip, route }: { trip: Trip; route?: RouteInfo | null
         ) : null}
       </ol>
 
-      {first?.lat && first?.lon ? (
+      {startPoint ? (
         <MapView
-          shops={[
-            {
-              shop_id: first.shop_id,
-              offer_id: "",
-              name: first.name,
-              price: first.price ?? 0,
-              lat: first.lat,
-              lon: first.lon,
-              open_status: "open",
-              open_text: "",
-              in_person_providers: [],
-              transparency: { score: 0, chips: [] },
-              score: 0,
-              why: "",
-            },
-          ]}
-          center={[first.lat, first.lon]}
+          shops={mapStops.map((stop) => ({
+            shop_id: stop.shop_id,
+            offer_id: "",
+            name: stop.name,
+            price: stop.price ?? 0,
+            lat: stop.lat,
+            lon: stop.lon,
+            open_status: "open",
+            open_text: "",
+            in_person_providers: [],
+            transparency: { score: 0, chips: [] },
+            score: 0,
+            why: "",
+          }))}
+          center={startPoint}
+          start={
+            trip.start?.lat !== null &&
+            trip.start?.lat !== undefined &&
+            trip.start?.lon !== null &&
+            trip.start?.lon !== undefined
+              ? {
+                  lat: trip.start.lat,
+                  lon: trip.start.lon,
+                  label: trip.start.label,
+                }
+              : null
+          }
+          cafe={trip.cafe ?? null}
           route={route?.polyline ?? null}
+          fallbackRoute={buildTripLine(trip)}
         />
       ) : null}
 

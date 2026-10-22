@@ -1,9 +1,10 @@
 # ---------- web build ----------
 FROM node:20-alpine AS web
-WORKDIR /w
+WORKDIR /w/frontend
 COPY frontend/package*.json ./
 RUN npm ci
 COPY frontend/ ./
+# vite writes to ../static (see vite.config.ts), i.e. /w/static
 RUN npm run build
 
 # ---------- python runtime ----------
@@ -23,7 +24,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend/ ./backend
 COPY data/ ./data
-COPY --from=web /w/dist ./static
+COPY --from=web /w/static ./static
 
 EXPOSE 8000
 CMD ["uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8000"]

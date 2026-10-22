@@ -14,7 +14,11 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: "dist",
+    // The backend serves this folder directly (STATIC_DIR), so the production
+    // build must land in ../static - not in a separate frontend/dist that
+    // nobody serves. `emptyOutDir` keeps stale hashed assets out.
+    outDir: "../static",
+    emptyOutDir: true,
     sourcemap: false,
   },
 });

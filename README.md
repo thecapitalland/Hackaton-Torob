@@ -3,7 +3,8 @@
 **دستیار خرید حضوری در تهران** — از «امروز چی می‌خوام بخرم؟» تا «برنامهٔ رفتنم با کدوم مغازه شروع کنم».
 
 تربچه یک اپلیکیشن وب فارسی و موبایل‌فرست (React + LangGraph + FastAPI) است که با داده‌های واقعی ترب
-(۲۲۵٬۹۰۳ کالا · ۳۳۱٬۵۰۶ آفر · ۶٬۴۷۶ فروشگاه) کار می‌کند و فقط چیزی را نشان می‌دهد که **واقعاً در دیتابیس هست**.
+(دیتاست خام: ۲۲۵٬۹۰۳ کالا · ۳۳۱٬۵۰۶ آفر · ۶٬۴۷۶ فروشگاه؛ خروجی اسلیم: **۴۰٬۱۲۰ کالا · ۱۱۵٬۱۸۵ آفر · ۲٬۷۵۱ فروشگاه**)
+کار می‌کند و فقط چیزی را نشان می‌دهد که **واقعاً در دیتابیس هست**.
 
 ---
 
@@ -55,31 +56,54 @@
 
 ### ۰) از صفر (Run from scratch)
 
-از کلون تمیز تا اجرا — بدون هیچ کلید API:
+از کلون تمیز تا اجرا — بدون هیچ کلید API.
 
-```bash
+**ویندوز (PowerShell):**
+
+```powershell
 # 1) venv + نصب وابستگی‌ها
 python -m venv .venv
-.venv\Scripts\activate                      # ویندوز  |  لینوکس: source .venv/bin/activate
-pip install -r backend/requirements.txt
+.venv\Scripts\Activate.ps1
+pip install -r backend\requirements.txt
 
-# 2) ساخت دیتابیس از دیتاست خام ترب
-python backend/scripts/build_catalog.py --src <مسیر دیتاست torob-dataset> --out data/catalog.db
-python backend/scripts/build_markets.py --catalog data/catalog.db --out data/markets.json
+# 2) ساخت دیتابیس از دیتاست خام ترب (به shops.csv / products.csv / offers.csv نیاز دارد)
+python backend\scripts\build_catalog.py --src <مسیر دیتاست torob-dataset> --out data\catalog.db
+python backend\scripts\build_markets.py --catalog data\catalog.db --out data\markets.json
 
-# 3) بیلد فرانت‌اند (بک‌اند فولدر static/ را همان‌طور که هست سرو می‌کند)
-cd frontend && npm install --cache ..\.npm-cache && npm run build && cd ..
+# 3) بیلد فرانت‌اند — خروجی مستقیماً در static/ ساخته می‌شود (همان‌جا که بک‌اند سرو می‌کند)
+cd frontend
+npm install --cache ..\.npm-cache
+npm run build
+cd ..
 
-# 4) اجرا بدون LLM (حالت قاعده‌محور) و دموِ تکرارپذیر
-set PYTHONIOENCODING=utf-8                         # فقط ویندوز
-set LLM_MODE=off
-set DEMO_MODE=1
-set DEMO_NOW=2026-10-22T15:00:00+03:30
+# 4) اجرا بدون LLM و دموِ تکرارپذیر
+$env:PYTHONIOENCODING="utf-8"
+$env:LLM_MODE="off"; $env:DEMO_MODE="1"; $env:DEMO_NOW="2026-10-22T15:00:00+03:30"
 .venv\Scripts\python.exe -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
-#   لینوکس: PYTHONIOENCODING=utf-8 LLM_MODE=off DEMO_MODE=1 uvicorn backend.app.main:app --port 8000
 ```
 
-→ `http://127.0.0.1:8000/` (لینوکس/سایر سیستم‌ها معادل همان دستورها با `export`).
+**لینوکس / macOS:**
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate && pip install -r backend/requirements.txt
+python backend/scripts/build_catalog.py --src /path/to/torob-dataset --out data/catalog.db
+python backend/scripts/build_markets.py --catalog data/catalog.db --out data/markets.json
+(cd frontend && npm ci && npm run build)
+PYTHONIOENCODING=utf-8 LLM_MODE=off DEMO_MODE=1 DEMO_NOW=2026-10-22T15:00:00+03:30 uvicorn backend.app.main:app --port 8000
+```
+
+→ `http://127.0.0.1:8000/`
+
+نکته‌های بازتولیدپذیری:
+
+- `vite.config.ts` مقدار `build.outDir` را روی `../static` گذاشته است؛ بنابراین `npm run build` دقیقاً همان جایی
+  می‌نویسد که FastAPI سرو می‌کند و کپی دستی لازم نیست. اگر فقط بیلد قدیمی `frontend/dist` موجود باشد،
+  `STATIC_DIR` به‌طور خودکار به آن fallback می‌کند.
+- ورودی `build_catalog.py` باید سه CSV رسمی `shops.csv`، `products.csv` و `offers.csv` را داشته باشد.
+  شمارش مورد انتظار بعد از اسلیم: **۴۰٬۱۲۰ کالا / ۱۱۵٬۱۸۵ آفر / ۲٬۷۵۱ فروشگاه**
+  (دیتاست خام: ۲۲۵٬۹۰۳ / ۳۳۱٬۵۰۶ / ۶٬۴۷۶ — کاهش عمدی برای زیر ۱۵۰ مگابایت شدن دیتابیس و حذف پرت‌هاست).
+- `build_markets.py` فایل `data/markets.json` را **بازنویسی** می‌کند؛ تغییرات دستی در آن (بازارهای بیرونی،
+  ساعت‌های کاری) باید در `MARKET_DEFINITIONS` / `EXTERNAL_MARKETS` داخل اسکریپت اعمال شود، نه فقط در JSON.
 
 بعداً وقتی کلید BoxAPI و (اختیاری) کلید نشان (`NESHAN_API_KEY`) را در `.env` گذاشتی،
 یک بار `python backend/scripts/smoke_llm.py` را بزن تا base_url/model درست پیدا شود،
@@ -148,14 +172,19 @@ curl https://<app>.liara.run/api/health
 
 ```bash
 pytest backend/tests -q
+# تست‌های واحد فرانت‌اند (helpers خالص: قیمت، ساعت، آیکن، فیلتر بازار، خط سفر)
+cd frontend && npm test
 ```
 
 | فایل | چه چیزی را می‌سنجد |
 |---|---|
-| `test_search.py` | «هدفون بلوتوثی زیر ۴ میلیون» → R50i در ۳ تای اول، «گوشی سامسونگ» → A07/A17، «A55» → گوشی نه LCD |
-| `test_hours.py` | مهریسا نوین پنجشنبه ۱۵:۰۰ → «باز است تا ۲۰:۳۰»، جمعه → بسته، آوان آران → نامشخص، `00:00–00:00` نادیده گرفته شود |
-| `test_ooc.py` | زعفران → بازار سید اسماعیل، سه‌تار → گیتار + بازار بهارستان، حذف «تومان» از نکته‌ها |
+| `test_search.py` | «هدفون بلوتوثی زیر ۴ میلیون» → R50i در ۳ تای اول، «گوشی سامسونگ» → A07/A17، «A55» → گوشی نه LCD، توکنایز «لپ تاپ» (بدون «تاپ»)، ۳ کارت لپ‌تاپ |
+| `test_clarify.py` | پاسخ «جمهوری» به سؤال محله → `slots.location`، «مهم نیست» → skip و رسیدن به کارت‌ها، پاسخ بودجه قبل از understand |
+| `test_hours.py` | مهریسا نوین پنجشنبه ۱۵:۰۰ → «باز است تا ۲۰:۳۰» با ارقام فارسی، جمعه → بسته، آوان آران → نامشخص، ترجمهٔ ساعت بازارها |
+| `test_ooc.py` | زعفران/زعفرون → بازار سید اسماعیل، حذف گزینه‌های بی‌ربط (بدون پیجر/عطر)، سه‌تار → گیتار، حذف «تومان» از نکته‌ها |
+| `test_seller.py` | «طبقه» پاسخ شبیه‌سازی‌شده با `floor` واقعی فروشگاه یکی است |
 | `test_api.py` | کل مسیر: چت → سؤال → کارت → فروشگاه → تأیید پیام → برنامهٔ رفتن (با `LLM_MODE=off`) |
+| `frontend/src/lib/pure.test.ts` | `formatPrice` (گروه‌بندی fa-IR)، `faHours`، آیکن دسته، نام بهترین فروشگاه تأییدشده، فیلتر شعاع بازار، خط dashed سفر |
 
 ## 🔐 قوانین سخت (که در کد رعایت شده‌اند)
 

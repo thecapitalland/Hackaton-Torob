@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+from app import rules
+from app.graph import _search_with_fallback
 from app.tools import catalog
 
 R50I = "product_92ac53fa75e18e8e73f20b56"
@@ -74,3 +76,47 @@ def test_search_score_category_factor(catalog_path):
     partial = catalog.search_score(["هدفون"], product, None)
     assert full == pytest.approx(1.0)
     assert partial == pytest.approx(0.6)
+
+
+def test_laptop_keywords_never_leak_usage_words(catalog_path):
+    text = "لپ تاپ ایسوس برای برنامه نویسی تا ۵۰ میلیون"
+    category = rules.detect_category(text, catalog.all_category_names())
+    assert category == "لپ تاپ و نوت بوک"
+    keywords = rules.extract_keywords(text, category)
+    assert "تاپ" not in keywords
+    assert "لپ" not in keywords
+    for usage_word in ("برای", "برنامه", "نویسی", "میخوام"):
+        assert usage_word not in keywords
+    assert "ایسوس" in keywords
+
+
+def test_laptop_query_returns_an_asus_card(catalog_path):
+    text = "لپ تاپ ایسوس برای برنامه نویسی تا ۵۰ میلیون"
+    category = rules.detect_category(text, catalog.all_category_names())
+    budget_max, budget_min = rules.parse_budget(text)
+    slots = {
+        "category": category,
+        "keywords": rules.extract_keywords(text, category),
+        "budget_max": budget_max,
+        "budget_min": budget_min,
+    }
+    candidates, _ = _search_with_fallback(slots)
+    assert candidates, "the laptop query must not fall through to out_of_catalog"
+    cards = catalog.pick_cards(candidates, budget_max)
+    assert cards
+    asus = [
+        card
+        for card in cards
+        if "ایسوس" in f"{card.get('persian_title', '')} {card.get('brand_name', '')}"
+    ]
+    assert asus, [card.get("persian_title") for card in cards]
+
+
+def test_three_laptop_candidates_produce_three_cards(catalog_path):
+    candidates = catalog.search_products(
+        [], "لپ تاپ و نوت بوک", budget_max=500_000_000, limit=30, min_shops=1
+    )
+    assert len(candidates) >= 3
+    cards = catalog.pick_cards(candidates, 500_000_000)
+    assert len(cards) == 3
+    assert [card["kind"] for card in cards] == ["best", "budget", "premium"]

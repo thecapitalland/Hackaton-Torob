@@ -13,6 +13,25 @@ def test_saffron_is_not_found_and_maps_to_spice_market():
     assert market["market_id"] == "gb_spice"
 
 
+def test_saffron_alone_maps_to_spice_market_with_filler_words():
+    market = ooc.match_external_market("زعفران می‌خوام لطفا")
+    assert market is not None
+    assert market["market_id"] == "gb_spice"
+    assert ooc.clean_query("زعفران می‌خوام لطفا") == "زعفران"
+
+    colloquial = ooc.match_external_market("زعفرون میخوام")
+    assert colloquial is not None
+    assert colloquial["market_id"] == "gb_spice"
+
+
+def test_saffron_has_no_irrelevant_dataset_alternatives():
+    market = ooc.match_external_market("زعفران")
+    assert market is not None
+    # no pager, perfume or phone-case may sneak in through low trigram overlap
+    assert ooc.find_alternatives("زعفران", market) == []
+    assert ooc._category_candidates("زعفران", market) == []
+
+
 def test_three_tar_maps_to_music_market():
     market = ooc.match_external_market("سه‌تار")
     assert market is not None

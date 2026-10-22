@@ -18,13 +18,61 @@ from .markets import external_markets
 MONEY_RE = re.compile(r"\d[\d٬,،\.]*\s*(تومان|تومن|تومان\s|میلیون|هزار\s?تومان)")
 PHONE_RE = re.compile(r"(?:\+?98|0098|0)?9\d{9}|\b0\d{2,3}[-\s]?\d{7,8}\b")
 
+# Filler words must be removed before comparing the query with the dataset
+# categories: «زعفران می‌خوام» and «زعفران» are the same request.
+FILLER_WORDS = {
+    "میخوام",
+    "میخواهم",
+    "میخواستم",
+    "می‌خوام",
+    "می‌خواهم",
+    "یه",
+    "یک",
+    "چند",
+    "برای",
+    "من",
+    "ما",
+    "لطفا",
+    "لطفاً",
+    "دنبال",
+    "هستم",
+    "بخرم",
+    "خرید",
+    "کجا",
+    "پیدا",
+    "کنم",
+    "کنید",
+    "دارید",
+    "داره",
+    "دارن",
+    "سلام",
+    "میخوای",
+    "قیمت",
+    "چنده",
+    "چقدر",
+    "است",
+    "هست",
+}
+
+# Minimum trigram similarity between the query and a dataset category.
+# Without it, a saffron query used to return pagers or perfumes just because
+# they shared a couple of trigrams.
+MIN_CATEGORY_SIMILARITY = 0.25
+
+
+def clean_query(query: str) -> str:
+    """Normalize text and drop filler words (no trigrams yet)."""
+    normalized = normalize(query)
+    tokens = [token for token in normalized.split() if token and token not in FILLER_WORDS]
+    return " ".join(tokens)
+
 
 def match_external_market(query: str) -> dict | None:
     """Find the Tehran market that usually hosts this kind of product."""
     if not query:
         return None
     normalized = normalize(query)
-    tokens = [t for t in normalized.split() if len(t) > 2]
+    tokens = [t for t in normalized.split() if len(t) > 2 and t not in FILLER_WORDS]
     best: tuple[float, dict] | None = None
     for market in external_markets():
         score = 0.0
@@ -49,15 +97,25 @@ def match_external_market(query: str) -> dict | None:
 
 
 def _category_candidates(query: str, market: dict | None) -> list[str]:
-    """Dataset categories that are closest to the query (best match first)."""
+    """Dataset categories that are closest to the query (best match first).
+
+    Curated ``related_dataset_categories`` of the matched market always win
+    (e.g. «سه‌تار» -> گیتار); every other category has to pass
+    ``MIN_CATEGORY_SIMILARITY`` or it is dropped. Returning an empty list is
+    better than suggesting a pager to someone who asked for saffron.
+    """
     related = list((market or {}).get("related_dataset_categories") or [])
-    query_tri = trigrams(query)
+    cleaned = clean_query(query)
+    if not cleaned:
+        return []
+    query_tri = trigrams(cleaned)
     scored: list[tuple[float, str]] = []
     for category in all_category_names():
         score = jaccard(query_tri, trigrams(category))
         if category in related:
-            score += 1.0
-        if score > 0.05:
+            # curated relation: keep it even when the words are different
+            scored.append((1.0 + score, category))
+        elif score >= MIN_CATEGORY_SIMILARITY:
             scored.append((score, category))
     scored.sort(key=lambda item: (-item[0], item[1]))
     return [category for _, category in scored[:3]]

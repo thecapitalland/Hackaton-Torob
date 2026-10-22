@@ -16,6 +16,8 @@ import json
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
+from ..normalize import fa_digits
+
 TEHRAN = ZoneInfo("Asia/Tehran")
 
 WEEKDAY_KEY = {
@@ -126,13 +128,13 @@ def open_status(weekly_hours: str | None, now: datetime | None = None) -> tuple[
     for start, end in bounds:
         if start <= end:
             if start <= current < end:
-                return "open", f"باز است تا {end.strftime('%H:%M')}"
+                return "open", f"باز است تا {fa_digits(end.strftime('%H:%M'))}"
         else:  # overnight shift
             if current >= start or current < end:
                 closing = datetime.combine(now.date(), end, tzinfo=now.tzinfo)
                 if current < end:
                     closing += timedelta(days=1)
-                return "open", f"باز است تا {closing.strftime('%H:%M')}"
+                return "open", f"باز است تا {fa_digits(closing.strftime('%H:%M'))}"
     return "closed", "الان بسته"
 
 
@@ -151,7 +153,10 @@ def today_hours_text(weekly_hours: str | None, now: datetime | None = None) -> s
     bounds = [b for b in (_shift_bounds(s) for s in shifts) if b]
     if not bounds:
         return "ساعت کاری اعلام نشده"
-    parts = [f"{start.strftime('%H:%M')} تا {end.strftime('%H:%M')}" for start, end in bounds]
+    parts = [
+        f"{fa_digits(start.strftime('%H:%M'))} تا {fa_digits(end.strftime('%H:%M'))}"
+        for start, end in bounds
+    ]
     return "، ".join(parts)
 
 

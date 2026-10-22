@@ -453,6 +453,28 @@ def pick_cards(candidates: list[dict], budget_max: int | None) -> list[dict]:
         premium["kind"] = "premium"
         chosen.append(premium)
 
+    # Guarantee the promised best/budget/premium trio whenever the pool has at
+    # least three distinct products.  Sometimes the highest-scoring product is
+    # also the most expensive one, so no product is *above* it and the premium
+    # step above finds nothing - fall back to the next most expensive option.
+    target = min(3, len(scored))
+    for kind in ("premium", "budget"):
+        if len(chosen) >= target:
+            break
+        if any(item.get("kind") == kind for item in chosen):
+            continue
+        pool = [item for item in scored if item["product_id"] not in used]
+        if not pool:
+            continue
+        pick = (
+            max(pool, key=lambda item: item["median"])
+            if kind == "premium"
+            else min(pool, key=lambda item: item["median"])
+        )
+        pick["kind"] = kind
+        used.add(pick["product_id"])
+        chosen.append(pick)
+
     # keep the requested order: best, budget, premium
     order = {"best": 0, "budget": 1, "premium": 2}
     chosen.sort(key=lambda item: order.get(item.get("kind", "best"), 3))

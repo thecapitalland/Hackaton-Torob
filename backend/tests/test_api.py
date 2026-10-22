@@ -102,6 +102,11 @@ def test_full_journey(client):
     assert followup["simulated"] is True
     assert followup["delay_ms"] > 0
     assert followup["parsed"] is not None
+    # the verification summary lives in the inbox (with its trip CTA), not as
+    # a duplicated chat bubble above the product cards
+    assert not any(
+        "فروشگاه تأیید کرد" in message["content"] for message in approved["messages"]
+    )
 
     trip = client.post(
         "/api/trip", json={"session_id": session_id, "shop_ids": [shop["shop_id"]]}

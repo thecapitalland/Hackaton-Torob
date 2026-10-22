@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { ApiError, api } from "./api";
 import { copy } from "./copy.fa";
-import { faDigits } from "./format";
+import { faDigits, formatPrice } from "./format";
+import { shopsInMarket } from "./lib/market";
 import type {
   ApiResponse,
   Followup,
@@ -47,6 +48,7 @@ export default function App() {
   const [cards, setCards] = useState<ProductCard[]>([]);
   const [more, setMore] = useState<MoreItem[]>([]);
   const [market, setMarket] = useState<Market | null>(null);
+  const [marketFilter, setMarketFilter] = useState<Market | null>(null);
   const [ooc, setOoc] = useState<Ooc | null>(null);
   const [product, setProduct] = useState<Product | null>(null);
   const [shops, setShops] = useState<Shop[]>([]);
@@ -180,6 +182,7 @@ export default function App() {
       if (!value || busy || !sessionId) return;
       setBusy(true);
       setStarted(true);
+      setMarketFilter(null);
       setMessages((prev) => [...prev, { role: "user", content: value }]);
       setInput("");
       try {
@@ -204,6 +207,7 @@ export default function App() {
     async (answer: string) => {
       if (!sessionId || busy) return;
       setBusy(true);
+      setMarketFilter(null);
       setMessages((prev) => [...prev, { role: "user", content: answer }]);
       try {
         const response = await api.resume(sessionId, answer);
@@ -347,6 +351,11 @@ export default function App() {
   // ------------------------------------------------------------- render
   const pendingQuestion = pending && pending.type === "question" ? pending : null;
   const pendingApproval = pending && pending.type === "approval" ? pending : null;
+  // P1.6: the market filter applies to the list *and* the map at the same time
+  const visibleShops = useMemo(
+    () => shopsInMarket(shops, marketFilter),
+    [shops, marketFilter],
+  );
 
   return (
     <div className="min-h-screen bg-brand-bg">
@@ -474,15 +483,25 @@ export default function App() {
                 ) : null}
 
                 {market && !ooc ? (
-                  <MarketCard market={market} onFilterMarket={() => undefined} />
+                  <MarketCard
+                    market={market}
+                    filterActive={marketFilter?.market_id === market.market_id}
+                    onFilterMarket={(next) =>
+                      setMarketFilter((prev) =>
+                        prev?.market_id === next.market_id ? null : next,
+                      )
+                    }
+                  />
                 ) : null}
 
                 {ooc ? <OutOfCatalogCard ooc={ooc} onPickAlternative={selectProduct} /> : null}
 
                 {shops.length ? (
                   <StoresSection
-                    shops={shops}
+                    shops={visibleShops}
                     market={market}
+                    marketFilter={marketFilter}
+                    onClearMarketFilter={() => setMarketFilter(null)}
                     userLocation={location ?? slots.location ?? null}
                     selected={selectedShops}
                     routes={routes}
@@ -544,8 +563,8 @@ export default function App() {
               <div>
                 <h2 className="text-[15px] font-bold">🗺️ نقشهٔ مغازه‌ها</h2>
                 <p className="text-[11.5px] text-brand-gray">
-                  {shops.length
-                    ? `${faDigits(shops.length)} فروشگاه برای کالای انتخابی`
+                  {visibleShops.length
+                    ? `${faDigits(visibleShops.length)} فروشگاه برای کالای انتخابی`
                     : "اول یک کالا انتخاب کن"}
                 </p>
               </div>
@@ -558,7 +577,7 @@ export default function App() {
 
             <div className="flex-1 overflow-hidden rounded-card border border-brand-border shadow-card">
               <MapView
-                shops={shops}
+                shops={visibleShops}
                 market={market}
                 userLocation={location ?? slots.location ?? null}
                 route={tripRoute?.polyline ?? null}
@@ -566,9 +585,9 @@ export default function App() {
               />
             </div>
 
-            {shops.length ? (
+            {visibleShops.length ? (
               <div className="max-h-[28vh] space-y-1.5 overflow-y-auto rounded-card border border-brand-border bg-white p-3 shadow-card">
-                {shops.slice(0, 12).map((shop) => (
+                {visibleShops.slice(0, 12).map((shop) => (
                   <div
                     key={shop.shop_id}
                     className="flex items-center justify-between gap-2 rounded-xl border border-brand-border px-3 py-2 text-[12px]"
@@ -578,7 +597,7 @@ export default function App() {
                       {shop.name}
                     </span>
                     <span className="shrink-0 font-bold text-brand-red">
-                      {faDigits(shop.price)} تومان
+                      {formatPrice(shop.price)} تومان
                     </span>
                   </div>
                 ))}

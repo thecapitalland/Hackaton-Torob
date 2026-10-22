@@ -18,6 +18,8 @@ class Slots(TypedDict, total=False):
     budget_max: Optional[int]
     budget_min: Optional[int]
     location: Optional[dict]  # {"label": "میدان فردوسی", "lat": 35.7010, "lon": 51.4187}
+    location_skipped: bool
+    budget_skipped: bool
     payment_in_person: bool
     installment: bool
     today: bool

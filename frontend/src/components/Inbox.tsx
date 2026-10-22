@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { copy } from "../copy.fa";
-import { faDigits, formatPriceShort } from "../format";
+import { faDigits, formatPrice } from "../format";
+import { bestConfirmedName } from "../lib/followups";
 import type { Followup } from "../types";
 
 function ParsedChip({ followup }: { followup: Followup }) {
@@ -29,7 +30,7 @@ function ParsedChip({ followup }: { followup: Followup }) {
       }`}
     >
       {priceChanged ? copy.inbox.priceChanged : copy.inbox.available}
-      {parsed.price_toman ? ` · ${formatPriceShort(parsed.price_toman)}` : ""}
+      {parsed.price_toman ? ` · ${formatPrice(parsed.price_toman)} تومان` : ""}
       {parsed.hours_text ? ` · ${parsed.hours_text}` : ""}
     </span>
   );
@@ -141,6 +142,7 @@ export function Inbox({
   const confirmed = followups.filter(
     (followup) => followup.parsed?.availability === "available",
   ).length;
+  const bestName = bestConfirmedName(followups);
 
   if (!followups.length) return null;
 
@@ -153,7 +155,7 @@ export function Inbox({
           className="rounded-2xl border border-brand-green/40 bg-brand-green/10 p-3"
         >
           <p className="text-[13px] font-bold text-brand-green">
-            {faDigits(confirmed)} فروشگاه تأیید کرد. پیشنهادم: {confirmed} گزینهٔ اول 🏆
+            {faDigits(confirmed)} فروشگاه تأیید کرد. پیشنهادم: {bestName ?? "—"} 🏆
           </p>
           <button
             onClick={onPlanTrip}

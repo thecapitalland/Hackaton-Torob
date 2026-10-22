@@ -39,7 +39,26 @@ from .tools import catalog, markets  # noqa: E402
 from .tools.geo import haversine_m  # noqa: E402
 from .tools.hours import now_tehran  # noqa: E402
 
-STATIC_DIR = Path(os.environ.get("STATIC_DIR", Path(__file__).resolve().parents[2] / "static"))
+def _default_static_dir() -> Path:
+    """Where the SPA build lives.
+
+    ``npm run build`` now writes to ``static/`` (vite outDir ../static), but a
+    fresh clone that only ran an older build may still have ``frontend/dist``.
+    Prefer the documented path and fall back to dist only when it is missing.
+    """
+    root = Path(__file__).resolve().parents[2]
+    static = root / "static"
+    if static.exists():
+        return static
+    dist = root / "frontend" / "dist"
+    return dist if dist.exists() else static
+
+
+STATIC_DIR = (
+    Path(os.environ["STATIC_DIR"])
+    if os.environ.get("STATIC_DIR")
+    else _default_static_dir()
+)
 
 app = FastAPI(title="Torobche", version="1.0.0")
 

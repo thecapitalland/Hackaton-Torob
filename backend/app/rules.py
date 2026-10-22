@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 
-from .normalize import CATEGORY_SYNONYMS, NEIGHBORHOODS, normalize
+from .normalize import CATEGORY_SYNONYMS, NEIGHBORHOODS, fa_digits, normalize
 
 BUDGET_RE = re.compile(r"(\d+(?:[\.,٫]\d+)?)\s*(میلیون|میلیون\s+تومان|تومن|تومان|هزار|م)\b")
 RIALS_RE = re.compile(r"(\d+(?:[\.,٫]\d+)?)\s*ریال")
@@ -29,6 +29,7 @@ NOT_IN_TOROB_WORDS = (
     "کار دست",
     "ادویه",
     "زعفران",
+    "زعفرون",
     "عطاری",
 )
 
@@ -147,52 +148,88 @@ def extract_keywords(text: str, category: str | None = None, extra_stop_words: l
     if not text:
         return []
     stop_words = {
-        "میخوام",
-        "میخواهم",
-        "میخواهیم",
-        "بخرم",
-        "بخریم",
-        "پیدا",
-        "کن",
-        "کنید",
-        "لطفا",
-        "لطفاً",
-        "امروز",
-        "حضوری",
-        "نزدیک",
-        "به",
-        "از",
-        "در",
-        "با",
-        "و",
-        "یا",
-        "یک",
-        "یه",
-        "که",
-        "برای",
-        "من",
-        "خوب",
-        "بهترین",
-        "عالی",
-        "خانم",
-        "آقا",
-        "قیمت",
-        "ارزان",
-        "گرون",
-        "ارزون",
-        "میلیون",
-        "تومان",
-        "تومن",
-        "میلیونی",
-        "تا",
-        "زیر",
-        "حدود",
-        "بودجه",
-        "دست",
-        "دوم",
-        "زنانه",
-        "مردانه",
-        "میخوام بخرم",
+        normalize(word)
+        for word in {
+            "میخوام",
+            "میخواهم",
+            "میخواهیم",
+            "میخواستم",
+            "بخرم",
+            "بخریم",
+            "خرید",
+            "پیدا",
+            "کن",
+            "کنید",
+            "کنم",
+            "لطفا",
+            "لطفاً",
+            "امروز",
+            "حضوری",
+            "نزدیک",
+            "به",
+            "از",
+            "در",
+            "با",
+            "و",
+            "یا",
+            "یک",
+            "یه",
+            "که",
+            "برای",
+            "من",
+            "خوب",
+            "بهترین",
+            "عالی",
+            "خانم",
+            "آقا",
+            "قیمت",
+            "ارزان",
+            "گرون",
+            "ارزون",
+            "میلیون",
+            "تومان",
+            "تومن",
+            "میلیونی",
+            "تا",
+            "زیر",
+            "حدود",
+            "بودجه",
+            "دست",
+            "دوم",
+            "زنانه",
+            "مردانه",
+            "میخوام بخرم",
+            # intent / usage words: they describe *why* the product is bought,
+            # not *which* product it is, so they must never become search terms
+            "برنامه",
+            "برنامه نویسی",
+            "برنامهنویسی",
+            "نویسی",
+            "گیمینگ",
+            "گیم",
+            "بازی",
+            "دانشجویی",
+            "دانشجو",
+            "دانشگاهی",
+            "استفاده",
+            "مصرف",
+            "روزمره",
+            "مناسب",
+            "کیفیت",
+            "کاربری",
+            # generic product nouns: the detected category already covers them.
+            # Keeping them would split «لپ تاپ» into «تاپ» and break the AND
+            # search, so they are removed before tokenization.
+            "لپ تاپ",
+            "لپتاپ",
+            "لپ تپ",
+            "لپ",
+            "تاپ",
+            "نوت بوک",
+            "نوتبوک",
+            "نوت",
+            "بوک",
+        }
     }
     for word in extra_stop_words or []:
         cleaned = normalize(word)
@@ -203,10 +240,14 @@ def extract_keywords(text: str, category: str | None = None, extra_stop_words: l
                     stop_words.add(part)
     if category:
         stop_words.add(normalize(category))
-        for part in normalize(category).split():
-            if len(part) > 3:
-                stop_words.add(part)
-    tokens = re.findall(r"[^\W_]+", normalize(text), flags=re.UNICODE)
+        # every part of the category name (even short ones like «لپ»/«تاپ»)
+        stop_words.update(normalize(category).split())
+    normalized_text = normalize(text)
+    # remove multi-word category nouns *before* tokenizing so «لپ تاپ» can
+    # never leak a bare «تاپ» into the keyword list
+    for phrase in ("لپ تاپ", "لپ تپ", "نوت بوک"):
+        normalized_text = normalized_text.replace(phrase, " ")
+    tokens = re.findall(r"[^\W_]+", normalized_text, flags=re.UNICODE)
     keywords: list[str] = []
     for token in tokens:
         if len(token) < 3 or token in stop_words:
@@ -220,6 +261,39 @@ def extract_keywords(text: str, category: str | None = None, extra_stop_words: l
 # --------------------------------------------------------------------------
 # clarifying questions
 # --------------------------------------------------------------------------
+
+# Answers that mean "this slot does not matter to me".  They must mark the
+# slot as skipped so the clarify loop never asks the same question again.
+SKIP_ANSWER_WORDS = (
+    "مهم نیست",
+    "مهم نيست",
+    "فرقی نداره",
+    "فرقی نمیکنه",
+    "فرقی نمی‌کنه",
+    "فرق نداره",
+    "فرق نمیکنه",
+    "فرق نمی‌کنه",
+    "هر جایی",
+    "هرجایی",
+    "هرجا",
+    "هرچی",
+    "هر جور",
+    "هرجور",
+    "بدون محدودیت",
+    "محدودیت ندارم",
+    "نمی‌دونم",
+    "نمیدونم",
+    "اهمیتی نداره",
+)
+
+
+def is_skip_answer(text: str) -> bool:
+    """True when the user says the pending question does not matter."""
+    normalized = normalize(text)
+    if not normalized:
+        return False
+    return any(normalize(word) in normalized for word in SKIP_ANSWER_WORDS)
+
 
 CLARIFY_QUESTIONS = {
     "budget": {
@@ -312,7 +386,7 @@ def parse_reply(text: str, offer_price: int | None = None) -> dict:
             hour += 12
         elif ("ظهر" in normalized or "عصر" in normalized or "بعدازظهر" in normalized) and hour < 12:
             hour += 12
-        hours_text = f"تا {hour:02d}:{minute:02d}"
+        hours_text = f"تا {fa_digits(f'{hour:02d}:{minute:02d}')}"
 
     return {
         "availability": availability,

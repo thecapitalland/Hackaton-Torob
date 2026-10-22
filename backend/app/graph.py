@@ -189,9 +189,13 @@ def _compute_missing(slots: dict, asked: int) -> list[str]:
     if slots.get("in_torob") is False:
         return []
     missing: list[str] = []
-    if not slots.get("budget_max") and not slots.get("budget_min"):
+    if (
+        not slots.get("budget_max")
+        and not slots.get("budget_min")
+        and not slots.get("budget_skipped")
+    ):
         missing.append("budget")
-    if not slots.get("location"):
+    if not slots.get("location") and not slots.get("location_skipped"):
         missing.append("location")
     if not missing and asked < 1:
         if slots.get("installment") is None and slots.get("payment_in_person") is None:
@@ -357,6 +361,50 @@ def _llm_clarify(missing: list[str]) -> dict:
     return {"text": text, "chips": chips}
 
 
+def _apply_clarify_answer(slot: str, answer: str, slots: dict) -> dict:
+    """Map the answer of an interrupt to the slot that was asked about.
+
+    LangGraph resumes *inside* ``clarify`` and then re-runs ``understand`` with
+    the original user text, so without this mapping the answer («جمهوری»,
+    «مهم نیست», «تا ۵ میلیون») would be completely ignored and the same
+    question would be asked forever.
+    """
+    updated = dict(slots or {})
+    if not answer or not answer.strip():
+        return updated
+
+    if rules.is_skip_answer(answer):
+        # remember that the user explicitly said this slot does not matter;
+        # ``_compute_missing`` checks these flags and never asks again
+        updated[f"{slot}_skipped"] = True
+        return updated
+
+    if slot == "budget":
+        budget_max, budget_min = rules.parse_budget(answer)
+        if budget_max:
+            updated["budget_max"] = budget_max
+            updated["budget_skipped"] = False
+        if budget_min:
+            updated["budget_min"] = budget_min
+            updated["budget_skipped"] = False
+    elif slot == "location":
+        location = rules.detect_location(answer)
+        if location:
+            updated["location"] = location
+            updated["location_skipped"] = False
+    elif slot == "payment":
+        installment = rules.detect_installment(answer)
+        if installment is not None:
+            updated["installment"] = installment
+        else:
+            normalized = normalize(answer)
+            if any(word in normalized for word in ("اره", "بله", "باشه")):
+                updated["installment"] = True
+            elif any(word in normalized for word in ("نقد", "نه")):
+                updated["installment"] = False
+    return updated
+
+
 def clarify(state: AgentState) -> dict:
     started = time.time()
     missing = state.get("missing") or ["budget"]
@@ -371,8 +419,10 @@ def clarify(state: AgentState) -> dict:
         }
     )
     answer = question if isinstance(question, str) else str(question or "")
+    slots = _apply_clarify_answer(missing[0], answer, state.get("slots") or {})
     return {
         "asked": int(state.get("asked") or 0) + 1,
+        "slots": slots,
         "last_question": payload["text"],
         "messages": [{"role": "user", "content": answer}],
         "trace": [_trace("clarify", f"سؤال: {payload['text']}", started)],
@@ -903,7 +953,9 @@ def collect_replies(state: AgentState) -> dict:
     for index, followup in enumerate(followups):
         shop = shops.get(followup["shop_id"])
         price = int((shop or {}).get("price") or 0)
-        detail = seller_sim.seller_reply_detail(followup["shop_id"], price, index)
+        detail = seller_sim.seller_reply_detail(
+            followup["shop_id"], price, index, floor=(shop or {}).get("floor")
+        )
         followup["raw_reply"] = detail["text"]
         followup["status"] = detail["status"]
         followup["delay_ms"] = detail["delay_ms"]
@@ -972,19 +1024,18 @@ def rerank(state: AgentState) -> dict:
         for shop in shops
         if (parsed_by_shop.get(shop["shop_id"]) or {}).get("availability") == "available"
     ]
-    message = ""
-    if confirmed:
-        best = confirmed[0]
-        message = (
-            f"{fa_digits(str(len(confirmed)))} فروشگاه تأیید کرد. "
-            f"پیشنهادم: {best.get('name')} 🏆"
-        )
-    elif shops:
-        message = "متأسفانه تأییدی نگرفتیم؛ بهترین گزینه‌های فهرست همین‌هاست."
+    # The inbox already renders «N فروشگاه تأیید کرد. پیشنهادم: <best shop>» +
+    # the trip CTA, so the same summary must not be repeated as a chat bubble
+    # above the cards. Only the "nobody confirmed" case needs a message.
+    messages: list[dict] = []
+    if shops and not confirmed:
+        messages = [
+            {"role": "assistant", "content": "متأسفانه تأییدی نگرفتیم؛ بهترین گزینه‌های فهرست همین‌هاست."}
+        ]
     return {
         "shops": shops,
         "phase": "verify",
-        "messages": [{"role": "assistant", "content": message}] if message else [],
+        "messages": messages,
         "trace": [_trace("rerank", "رتبه‌بندی با پاسخ‌ها به‌روز شد", started)],
     }
 

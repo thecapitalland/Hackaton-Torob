@@ -1,27 +1,30 @@
 import { useState } from "react";
 import { copy } from "../copy.fa";
-import { faDigits, formatPriceShort } from "../format";
+import { faDigits, faHours, formatPriceShort } from "../format";
 import type { Market } from "../types";
 
-function hoursSummary(market: Market): { text: string; friday: string } {
+function hoursSummary(market: Market): string {
+  if (market.hours_text) return market.hours_text;
   const hours = (market.hours_external ?? {}) as Record<string, string>;
-  const friday = hours.fri ?? "";
   const typical =
     hours.typical ?? hours.sat_thu ?? hours.alaeddin ?? hours.charsou ?? hours.sat_wed ?? "";
-  return { text: typical, friday };
+  const friday = hours.fri ? `${copy.market.friday}: ${hours.fri}` : "";
+  return faHours([typical, friday].filter(Boolean).join(" — "));
 }
 
 export function MarketCard({
   market,
   onRoute,
   onFilterMarket,
+  filterActive = false,
 }: {
   market: Market;
   onRoute?: (market: Market) => void;
   onFilterMarket?: (market: Market) => void;
+  filterActive?: boolean;
 }) {
   const [open, setOpen] = useState(true);
-  const { text, friday } = hoursSummary(market);
+  const hours = hoursSummary(market);
   const routeUrl = `https://neshan.org/maps/@${market.center?.[0]},${market.center?.[1]},16z`;
 
   return (
@@ -63,10 +66,9 @@ export function MarketCard({
             </>
           )}
 
-          {text ? (
+          {hours ? (
             <p className="text-brand-muted">
-              {copy.market.hours} {text}
-              {friday ? ` — ${copy.market.friday}: ${friday}` : ""}
+              {copy.market.hours} {hours}
             </p>
           ) : null}
 
@@ -86,9 +88,13 @@ export function MarketCard({
             {onFilterMarket ? (
               <button
                 onClick={() => onFilterMarket(market)}
-                className="flex-1 rounded-xl bg-brand-purple py-2 text-center text-[12.5px] font-bold text-white"
+                className={`flex-1 rounded-xl py-2 text-center text-[12.5px] font-bold ${
+                  filterActive
+                    ? "border border-brand-green bg-brand-green/10 text-brand-green"
+                    : "bg-brand-purple text-white"
+                }`}
               >
-                {copy.market.onlyThisMarket}
+                {filterActive ? `✓ ${copy.market.showAll}` : copy.market.onlyThisMarket}
               </button>
             ) : null}
           </div>

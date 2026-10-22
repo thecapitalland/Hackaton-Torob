@@ -1,13 +1,14 @@
 import { motion } from "framer-motion";
 import { copy } from "../copy.fa";
-import { faDigits } from "../format";
+import { formatPrice } from "../format";
+import { categoryIcon } from "../lib/category";
 import type { Slots } from "../types";
 
 export function SlotPills({ slots }: { slots: Slots }) {
   const pills: string[] = [];
-  if (slots.category) pills.push(`🎧 ${slots.category}`);
-  if (slots.budget_max) pills.push(`💰 تا ${faDigits(slots.budget_max.toLocaleString("en-US")).replace(/,/g, "٬")}`);
-  if (slots.budget_min) pills.push(`💰 از ${faDigits(slots.budget_min.toLocaleString("en-US")).replace(/,/g, "٬")}`);
+  if (slots.category) pills.push(`${categoryIcon(slots.category)} ${slots.category}`);
+  if (slots.budget_max) pills.push(`💰 تا ${formatPrice(slots.budget_max)}`);
+  if (slots.budget_min) pills.push(`💰 از ${formatPrice(slots.budget_min)}`);
   if (slots.location?.label) pills.push(`📍 ${slots.location.label}`);
   if (slots.installment) pills.push("💳 قسطی");
   if (slots.payment_in_person) pills.push("💵 حضوری");

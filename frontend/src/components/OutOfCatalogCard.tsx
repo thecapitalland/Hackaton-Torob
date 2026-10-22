@@ -80,7 +80,7 @@ export function OutOfCatalogCard({
           </h4>
           {market.hours_text ? (
             <p className="mt-1 text-[12.5px] text-brand-muted">
-              🕘 {copy.market.hours} {market.hours_text}
+              {copy.market.hours} {market.hours_text}
             </p>
           ) : null}
           <span className="mt-2 inline-block rounded-full bg-brand-yellow px-2 py-1 text-[11px] text-brand-muted">

@@ -10,7 +10,7 @@ import {
 } from "react-leaflet";
 import L from "leaflet";
 import type { Market, Shop, SlotLocation } from "../types";
-import { faDigits, formatDistance } from "../format";
+import { faDigits, formatDistance, formatPrice } from "../format";
 
 const OSM_URL = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
 const OSM_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
@@ -38,18 +38,27 @@ export function MapView({
   shops,
   market,
   userLocation,
+  start,
+  cafe,
   center,
   onSelectShop,
   route,
+  fallbackRoute,
   className = "h-[320px]",
 }: {
   shops: Shop[];
   market?: Market | null;
   userLocation?: SlotLocation | null;
+  /** trip start marker (🏁) */
+  start?: { lat: number; lon: number; label?: string } | null;
+  /** cafe stop marker (☕) */
+  cafe?: { name: string; lat: number; lon: number; label?: string | null } | null;
   center?: [number, number] | null;
   onSelectShop?: (shop: Shop) => void;
   /** walking route polyline [[lat, lon], ...] - drawn when present */
   route?: [number, number][] | null;
+  /** straight fallback line, drawn dashed only when there is no real route */
+  fallbackRoute?: [number, number][] | null;
   className?: string;
 }) {
   const [tileUrl, setTileUrl] = useState(OSM_URL);
@@ -92,13 +101,14 @@ export function MapView({
     null;
 
   return (
-    <MapContainer
-      center={mapCenter}
-      zoom={14}
-      scrollWheelZoom
-      className={`${className} w-full rounded-card border border-brand-border`}
-      style={{ zIndex: 0 }}
-    >
+    <div className="relative">
+      <MapContainer
+        center={mapCenter}
+        zoom={14}
+        scrollWheelZoom
+        className={`${className} w-full rounded-card border border-brand-border`}
+        style={{ zIndex: 0 }}
+      >
       <Recenter center={mapCenter} />
       <TileLayer
         url={tileUrl}
@@ -166,7 +176,7 @@ export function MapView({
             <div className="text-right">
               <strong>{shop.name}</strong>
               <br />
-              {faDigits(shop.price)} تومان
+              {formatPrice(shop.price)} تومان
               <br />
               {shop.open_text}
             </div>
@@ -180,6 +190,35 @@ export function MapView({
           pathOptions={{ color: "#E63946", weight: 3, opacity: 0.9 }}
           interactive={false}
         />
+      ) : fallbackRoute && fallbackRoute.length >= 2 ? (
+        <Polyline
+          positions={fallbackRoute}
+          pathOptions={{
+            color: "#E63946",
+            weight: 3,
+            opacity: 0.85,
+            dashArray: "8 10",
+          }}
+          interactive={false}
+        />
+      ) : null}
+
+      {start ? (
+        <Marker
+          position={[start.lat, start.lon]}
+          icon={divIcon("start-marker", "🏁")}
+        >
+          <Popup>{start.label ?? "شروع مسیر"}</Popup>
+        </Marker>
+      ) : null}
+
+      {cafe ? (
+        <Marker position={[cafe.lat, cafe.lon]} icon={divIcon("cafe-marker", "☕")}>
+          <Popup>
+            {cafe.name}
+            {cafe.label ? ` · ${cafe.label}` : ""}
+          </Popup>
+        </Marker>
       ) : null}
 
       {userLocation ? (
@@ -190,7 +229,13 @@ export function MapView({
           <Popup>موقعیت شما</Popup>
         </Marker>
       ) : null}
-    </MapContainer>
+      </MapContainer>
+      {!route && fallbackRoute && fallbackRoute.length >= 2 ? (
+        <span className="pointer-events-none absolute right-3 top-3 z-[1000] rounded-full bg-white/95 px-2.5 py-1 text-[11px] font-bold text-brand-amber shadow-card">
+          خط مستقیم · فاصلهٔ تقریبی
+        </span>
+      ) : null}
+    </div>
   );
 }
 

@@ -12,6 +12,7 @@ labels them «اطلاعات عمومی».
 from __future__ import annotations
 
 from ..data_static import load_markets
+from ..normalize import fa_digits
 from .geo import haversine_m
 
 
@@ -104,6 +105,7 @@ def get_specialty_market(category: str, user_location: dict | None = None) -> di
         "price_q1_market": (stats.get("price_q1_median_q3_market") or [None, None, None])[0],
         "price_q3_market": (stats.get("price_q1_median_q3_market") or [None, None, None])[2],
         "hours_external": hours,
+        "hours_text": market_hours_text(market),
         "hours_label": "اطلاعات عمومی، ممکن است تغییر کند",
         "sources": market.get("hours_external", {}).get("source")
         or market.get("sources")
@@ -114,8 +116,53 @@ def get_specialty_market(category: str, user_location: dict | None = None) -> di
     }
 
 
+HOURS_KEYS_FA = {
+    "sat_thu": "شنبه تا پنجشنبه",
+    "sat_wed": "شنبه تا چهارشنبه",
+    "thu": "پنجشنبه",
+    "fri": "جمعه",
+    "alaeddin": "علاءالدین",
+    "charsou": "چارسو",
+    "typical": "",
+}
+
+# The curated opening hours are collected from public (mostly English) sources.
+# They are shown in a Persian UI, so both the words and the digits are
+# translated here - once, on the backend, for every market card.
+HOURS_VALUE_FA = (
+    ("closed (open Fridays of Esfand)", "تعطیل (جمعه‌های اسفند باز)"),
+    ("shop-dependent (unverified)", "بسته به فروشگاه (تأییدنشده)"),
+    ("open Fridays of Esfand", "جمعه‌های اسفند باز"),
+    ("Sat–Thu", "شنبه تا پنجشنبه"),
+    ("Sat-Thu", "شنبه تا پنجشنبه"),
+    ("Sat–Wed", "شنبه تا چهارشنبه"),
+    ("Sat-Wed", "شنبه تا چهارشنبه"),
+    ("Fridays shorter", "جمعه‌ها کوتاه‌تر"),
+    ("only Fridays", "فقط جمعه‌ها"),
+    ("street-front passages", "راسته‌های خیابانی"),
+    ("sources differ", "منابع متفاوت"),
+    ("shop-dependent", "بسته به فروشگاه"),
+    ("unverified", "تأییدنشده"),
+    ("inner", "داخل"),
+    ("daily", "هر روز"),
+    ("Fri", "جمعه"),
+    ("closed", "تعطیل"),
+)
+
+
+def localize_hours_text(value: str | None) -> str:
+    """«Sat–Thu 09:00-21:00» -> «شنبه تا پنجشنبه ۰۹:۰۰-۲۱:۰۰»."""
+    if not value:
+        return ""
+    text = str(value)
+    for english, persian in HOURS_VALUE_FA:
+        text = text.replace(english, persian)
+    text = text.replace("~", "حدود ").replace("  ", " ")
+    return fa_digits(text).strip()
+
+
 def market_hours_text(market: dict | None) -> str:
-    """«معمولاً ۹:۳۰ تا ۲۱:۳۰ — جمعه: تعطیل»"""
+    """«معمولاً ۰۹:۳۰ تا ۲۱:۳۰ — جمعه: تعطیل»"""
     if not market:
         return ""
     hours = market.get("hours_external") or {}
@@ -126,18 +173,14 @@ def market_hours_text(market: dict | None) -> str:
         value = hours.get(key)
         if not value:
             continue
-        if key == "fri":
-            parts.append(f"جمعه: {value}")
-        elif key == "note":
+        if key == "note":
             continue
-        elif key == "sat_thu" or key == "sat_wed":
-            parts.append(f"شنبه تا چهارشنبه: {value}")
-        elif key == "thu":
-            parts.append(f"پنجشنبه: {value}")
-        elif key == "typical":
-            parts.append(str(value))
+        localized = localize_hours_text(str(value))
+        label = HOURS_KEYS_FA.get(key, "")
+        if label:
+            parts.append(f"{label}: {localized}")
         else:
-            parts.append(f"{key}: {value}")
+            parts.append(localized)
     return " — ".join(parts[:3])
 
 
