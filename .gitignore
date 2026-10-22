@@ -1,0 +1,38 @@
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+*.egg-info/
+
+# node
+node_modules/
+dist/
+.vite/
+
+# built SPA (Dockerfile rebuilds it from frontend/dist)
+static/
+
+# data (catalog.db is rebuilt with backend/scripts/build_catalog.py)
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# secrets / local
+.env
+.env.local
+*.local
+
+# dataset & tools
+dataset/
+torob-dataset/
+*.csv
+*.zip
+
+# editors / os
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
