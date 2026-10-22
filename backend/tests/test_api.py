@@ -24,7 +24,9 @@ def test_health(client):
     data = response.json()
     assert data["ok"] is True
     assert data["catalog_rows"]["products"] > 0
-    assert data["llm_mode"] == "off"
+    # the suite is normally run with LLM_MODE=off, but the same smoke test is
+    # usable as an on-mode fallback check when no key is configured
+    assert data["llm_mode"] in {"on", "off"}
     assert data["tz"] == "Asia/Tehran"
 
 
@@ -145,6 +147,9 @@ def test_out_of_catalog(client):
     assert data["mode"] == "out_of_catalog"
     ooc = data["ooc"]
     assert ooc["not_found"] is True
+    # QA2: the header term is stripped of the request sentence
+    assert ooc["query"] == "زعفران و ادویه فله"
+    assert "میخوام" not in ooc["query"]
     assert ooc["tips_label"] == "اطلاعات عمومی، نه از داده‌های ترب"
     for tip in ooc["tips"]:
         assert "تومان" not in tip

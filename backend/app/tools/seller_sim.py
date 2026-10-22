@@ -14,6 +14,7 @@ from ..data_static import load_seller_replies
 from ..normalize import fa_digits
 
 PRICE_CHANGE_FACTOR = 1.065
+COUNTER_STEP = 50_000
 BASE_DELAY_MS = 2500
 DELAY_STEP_MS = 1700
 # «... هستیم، طبقه منفی یک.» -> the floor part is replaced with the real one
@@ -68,22 +69,78 @@ def seller_reply(shop_id: str, offer_price: int, seed: int = 42) -> str | None:
     return seller_reply_detail(shop_id, offer_price, index=0)["text"]
 
 
+def counter_price(target_price: int, offer_price: int) -> int:
+    """A seller counter between the target and the listed price (50k steps)."""
+    target = max(0, int(target_price or 0))
+    offer = max(target, int(offer_price or 0))
+    if offer <= target:
+        return offer
+    midpoint = (target + offer) // 2
+    rounded = ((midpoint + COUNTER_STEP // 2) // COUNTER_STEP) * COUNTER_STEP
+    return min(offer, max(target, rounded))
+
+
+def negotiation_outcome(shop_id: str, offer_price: int, target_price: int | None) -> str:
+    """Deterministic accept/counter for the demo.
+
+    The two scripted headphone shops land in the two interesting buckets:
+    مهریسا نوین accepts the target, آوان آران counters.  All other shops use
+    the same stable hash, so the demo is reproducible.
+    """
+    if target_price is None:
+        return "none"
+    try:
+        target = int(target_price)
+        offer = int(offer_price)
+    except (TypeError, ValueError):
+        return "none"
+    if target <= 0 or offer <= 0 or target >= offer:
+        return "none"
+    bucket = _stable_index(shop_id) % 4
+    if bucket == 1:
+        return "accepted"
+    if bucket == 3:
+        return "countered"
+    return "none"
+
+
 def seller_reply_detail(
-    shop_id: str, offer_price: int, index: int = 0, floor: str | None = None
+    shop_id: str,
+    offer_price: int,
+    index: int = 0,
+    floor: str | None = None,
+    target_price: int | None = None,
 ) -> dict:
     """Full scripted answer: status, text and the UI typing delay.
 
     ``floor`` is the shop's real floor from the catalog; it replaces the
     hardcoded «طبقه منفی یک» of the template so the simulated seller never
-    sends the user to a different floor than the shop card.
+    sends the user to a different floor than the shop card.  When the user
+    approved a target price, some shops accept it and some counter it.
     """
     data = load_seller_replies()
     templates = data.get("templates") or {}
     outcome = assignment_for(shop_id)
-    text = templates.get(outcome)
+    offer_status = "none"
+    counter = None
+    if outcome in {"available", "price_changed"}:
+        offer_status = negotiation_outcome(shop_id, offer_price, target_price)
+    if offer_status == "accepted":
+        template = templates.get("negotiation_accepted")
+        counter = None
+    elif offer_status == "countered":
+        template = templates.get("negotiation_countered")
+        counter = counter_price(int(target_price or 0), offer_price)
+    else:
+        template = templates.get(outcome)
+
+    text = template
     if isinstance(text, str):
-        text = text.replace("{price}", price_to_words(offer_price)).replace(
-            "{price_up}", price_to_words(price_up(offer_price))
+        text = (
+            text.replace("{price}", price_to_words(offer_price))
+            .replace("{price_up}", price_to_words(price_up(offer_price)))
+            .replace("{target}", price_to_words(target_price))
+            .replace("{counter}", price_to_words(counter))
         )
         replacement = f"، طبقه {fa_digits(str(floor).strip())}" if floor else ""
         text = FLOOR_RE.sub(replacement, text)
@@ -97,6 +154,8 @@ def seller_reply_detail(
         "unclear": "replied",
         "no_response": "no_response",
     }.get(outcome, "no_response")
+    if offer_status != "none" and status == "replied":
+        status = "replied"
 
     return {
         "shop_id": shop_id,
@@ -105,6 +164,9 @@ def seller_reply_detail(
         "text": text,
         "delay_ms": delay_for(index),
         "simulated": True,
+        "offer_status": offer_status,
+        "counter_price": counter,
+        "target_price": target_price,
     }
 
 

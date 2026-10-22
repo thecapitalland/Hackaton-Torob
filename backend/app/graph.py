@@ -36,7 +36,7 @@ from .normalize import (
     normalize,
 )
 from .state import AgentState
-from .tools import catalog, markets, ooc, ranking, seller_sim
+from .tools import catalog, haggle, markets, ooc, ranking, seller_sim
 from .tools.cafes import nearest_cafe
 from .tools.hours import now_tehran
 from .tools.markets import (
@@ -95,6 +95,8 @@ class ParseReplyOut(BaseModel):
     alternative: str | None = None
     installment: bool | None = None
     confidence: float = 0.5
+    offer_status: str = "none"
+    counter_price: int | None = None
 
 
 class TripOut(BaseModel):
@@ -104,6 +106,10 @@ class TripOut(BaseModel):
 class OocOut(BaseModel):
     message_fa: str = ""
     tips: list[str] = Field(default_factory=list)
+
+
+class HaggleOut(BaseModel):
+    lines: list[str] = Field(default_factory=list)
 
 
 # --------------------------------------------------------------------------
@@ -698,7 +704,10 @@ def recommend(state: AgentState) -> dict:
 def out_of_catalog(state: AgentState) -> dict:
     started = time.time()
     slots = state.get("slots") or {}
-    query = slots.get("query") or state.get("text") or ""
+    raw_query = slots.get("query") or state.get("text") or ""
+    # QA2: the header must show the product term («زعفران»), never the whole
+    # sentence («زعفران می‌خوام»).  All downstream lookups use the clean term.
+    query = ooc.product_term(raw_query)
     market = ooc.match_external_market(query)
     alternatives = ooc.find_alternatives(query, market)
 
@@ -788,6 +797,17 @@ def _sort_shops(options: list[dict], sort: str) -> list[dict]:
     return options
 
 
+def _llm_haggle_lines(payload: dict) -> list[str] | None:
+    client = get_client()
+    raw = client.chat_json(prompts.haggle_messages(payload))
+    if not raw:
+        return None
+    try:
+        return [str(line) for line in HaggleOut(**raw).lines if str(line).strip()]
+    except ValidationError:
+        return None
+
+
 def find_stores(state: AgentState) -> dict:
     started = time.time()
     slots = state.get("slots") or {}
@@ -802,6 +822,22 @@ def find_stores(state: AgentState) -> dict:
     )
     options = ranking.rank_shops(options, slots, now_tehran())
     options = _sort_shops(options, state.get("sort") or "recommended")
+
+    # Haggle analysis for every row.  The LLM may phrase the lines for the
+    # first five visible shops only; later rows get the same deterministic
+    # template, so the response stays fast and LLM_MODE=off is complete.
+    llm_on = get_client().enabled
+    stats = haggle.price_stats(offers)
+    for index, option in enumerate(options):
+        option["haggle"] = haggle.build_haggle(
+            option,
+            offers,
+            options,
+            llm_on=llm_on and index < 5,
+            llm_fn=_llm_haggle_lines if llm_on else None,
+        )
+    # keep the shared stats in the trace summary below readable
+    top_stats = stats
 
     specialty = get_specialty_market(
         (product or {}).get("category_name") or slots.get("category"), slots.get("location")
@@ -820,7 +856,13 @@ def find_stores(state: AgentState) -> dict:
                 "می‌خوای از چند تا ازشون بپرسم موجوده؟",
             }
         ],
-        "trace": [_trace("find_stores", f"{len(options)} فروشگاه برای محصول", started)],
+        "trace": [
+            _trace(
+                "find_stores",
+                f"{len(options)} فروشگاه · میانه {_price_fa(top_stats['median'])} تومان",
+                started,
+            )
+        ],
     }
 
 
@@ -854,12 +896,26 @@ def plan_contact(state: AgentState) -> dict:
     product = state.get("product") or {}
     targets = _pick_target_shops(state)
     title = product.get("persian_title") or "این مدل"
+    target_prices = [
+        int((target.get("haggle") or {}).get("target") or 0) for target in targets
+    ]
+    target_price = next((value for value in target_prices if value), None)
 
     client = get_client()
     payload = {
         "product": title,
         "product_id": product.get("product_id"),
-        "shops": [{"shop_id": t["shop_id"], "name": t.get("name")} for t in targets],
+        "shops": [
+            {
+                "shop_id": target["shop_id"],
+                "name": target.get("name"),
+                "price": target.get("price"),
+                "target_price": int((target.get("haggle") or {}).get("target") or 0) or None,
+            }
+            for target in targets
+        ],
+        "target_price": target_price,
+        "target_price_text": _price_fa(target_price),
         "installment": bool(slots.get("installment")),
         "today": bool(slots.get("today")),
     }
@@ -876,12 +932,19 @@ def plan_contact(state: AgentState) -> dict:
             [t.get("name", "") for t in targets],
             installment=bool(slots.get("installment")),
             today=bool(slots.get("today")),
+            target_price=target_price,
         )
 
     return {
         "draft_message": message,
         "draft_targets": [
-            {"shop_id": t["shop_id"], "name": t.get("name"), "price": t.get("price")} for t in targets
+            {
+                "shop_id": target["shop_id"],
+                "name": target.get("name"),
+                "price": target.get("price"),
+                "target_price": int((target.get("haggle") or {}).get("target") or 0) or None,
+            }
+            for target in targets
         ],
         "phase": "verify",
         "trace": [_trace("plan_contact", f"پیام برای {len(targets)} فروشگاه", started)],
@@ -927,6 +990,7 @@ def send_messages(state: AgentState) -> dict:
                 "simulated": True,
                 "raw_reply": None,
                 "parsed": None,
+                "target_price": target.get("target_price"),
                 "delay_ms": seller_sim.delay_for(len(followups)),
             }
         )
@@ -953,13 +1017,22 @@ def collect_replies(state: AgentState) -> dict:
     for index, followup in enumerate(followups):
         shop = shops.get(followup["shop_id"])
         price = int((shop or {}).get("price") or 0)
+        target_price = followup.get("target_price") or (
+            (shop or {}).get("haggle") or {}
+        ).get("target")
         detail = seller_sim.seller_reply_detail(
-            followup["shop_id"], price, index, floor=(shop or {}).get("floor")
+            followup["shop_id"],
+            price,
+            index,
+            floor=(shop or {}).get("floor"),
+            target_price=target_price,
         )
         followup["raw_reply"] = detail["text"]
         followup["status"] = detail["status"]
         followup["delay_ms"] = detail["delay_ms"]
         followup["simulated"] = True
+        followup["offer_status"] = detail.get("offer_status", "none")
+        followup["counter_price"] = detail.get("counter_price")
         if detail["status"] == "no_response":
             followup["call_transcript"] = seller_sim.call_transcript(followup.get("name") or "فروشگاه")
     return {
@@ -980,6 +1053,15 @@ def _parse_one(raw: str, offer_price: int) -> dict:
         if parsed:
             if parsed.get("availability") not in {"available", "unavailable", "unclear"}:
                 parsed["availability"] = "unclear"
+            if parsed.get("offer_status") not in {"accepted", "countered", "none"}:
+                parsed["offer_status"] = "none"
+            if parsed["offer_status"] == "countered":
+                counter = parsed.get("counter_price") or parsed.get("price_toman")
+                parsed["counter_price"] = counter
+                if counter:
+                    parsed["price_toman"] = counter
+            else:
+                parsed["counter_price"] = None
             price = parsed.get("price_toman")
             if price is not None and offer_price:
                 parsed["price_changed"] = abs(price - offer_price) / offer_price > 0.02
@@ -999,6 +1081,8 @@ def parse_replies(state: AgentState) -> dict:
                 "price_changed": False,
                 "hours_text": None,
                 "confidence": 0.0,
+                "offer_status": "none",
+                "counter_price": None,
             }
             continue
         price = int((shops.get(followup["shop_id"]) or {}).get("price") or 0)

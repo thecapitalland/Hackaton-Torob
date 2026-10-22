@@ -9,6 +9,7 @@ contributors in Persian so the ranking can be explained in the UI.
 
 from __future__ import annotations
 
+from ..normalize import fa_digits
 from .geo import haversine_m, walk_minutes
 from .hours import open_status, price_age_days
 from .transparency import in_person_providers, parse_warranty, transparency, warranty_summary
@@ -61,7 +62,11 @@ def build_shop_options(
                 "price": int(offer.get("price_toman") or 0),
                 "address": offer.get("address"),
                 "mall": offer.get("mall"),
-                "floor": offer.get("floor"),
+                # floors are data ("2", "5", "منفی یک"); the UI must never
+                # show Latin digits next to a Persian shop card
+                "floor": fa_digits(str(offer.get("floor")).strip())
+                if offer.get("floor")
+                else offer.get("floor"),
                 "unit": offer.get("unit"),
                 "plaque": offer.get("plaque"),
                 "lat": offer.get("lat"),
@@ -163,7 +168,10 @@ def rerank_after_replies(
             option["score"] = round(min(1.0, option.get("score", 0) + 0.3), 3)
             new_price = parsed.get("price_toman")
             if new_price:
+                option["negotiated_price"] = int(new_price)
                 option["price"] = int(new_price)
+            if parsed.get("offer_status"):
+                option["offer_status"] = parsed.get("offer_status")
         elif availability == "unavailable":
             option["score"] = round(max(0.0, option.get("score", 0) - 0.6), 3)
         else:

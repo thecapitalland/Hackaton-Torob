@@ -60,6 +60,9 @@ class ShopOption(TypedDict, total=False):
     score: float
     why: str
     verify: Optional[dict]
+    haggle: Optional[dict]
+    negotiated_price: Optional[int]
+    offer_status: Optional[str]
 
 
 class Followup(TypedDict, total=False):
@@ -72,6 +75,9 @@ class Followup(TypedDict, total=False):
     simulated: bool
     delay_ms: int
     call_transcript: Optional[str]
+    target_price: Optional[int]
+    offer_status: Optional[str]
+    counter_price: Optional[int]
 
 
 class AgentState(TypedDict, total=False):

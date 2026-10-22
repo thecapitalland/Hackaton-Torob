@@ -85,6 +85,31 @@ export interface Transparency {
   disclaimer?: string;
 }
 
+export type Fairness = "expensive" | "normal" | "good" | "single";
+
+export interface HaggleLeverage {
+  shop_id: string;
+  name: string;
+  price: number;
+  distance_m?: number | null;
+  delta_m?: number | null;
+  same_mall?: boolean;
+  saving?: number;
+}
+
+export interface Haggle {
+  label: Fairness;
+  median: number;
+  q1: number;
+  min: number;
+  n_shops: number;
+  target: number;
+  ceiling: number;
+  saving_pct: number;
+  leverage?: HaggleLeverage | null;
+  lines: string[];
+}
+
 export interface Shop {
   shop_id: string;
   offer_id: string;
@@ -108,6 +133,9 @@ export interface Shop {
   score: number;
   why: string;
   verify?: ParsedReply | null;
+  haggle?: Haggle | null;
+  negotiated_price?: number | null;
+  offer_status?: "accepted" | "countered" | "none" | null;
 }
 
 export interface ParsedReply {
@@ -118,6 +146,8 @@ export interface ParsedReply {
   alternative?: string | null;
   installment?: boolean | null;
   confidence: number;
+  offer_status?: "accepted" | "countered" | "none";
+  counter_price?: number | null;
 }
 
 /* ---------------------------------------------------------------- geo (Update #1) */
@@ -161,6 +191,9 @@ export interface Followup {
   simulated: boolean;
   delay_ms: number;
   call_transcript?: string | null;
+  target_price?: number | null;
+  offer_status?: "accepted" | "countered" | "none" | null;
+  counter_price?: number | null;
 }
 
 export interface Market {

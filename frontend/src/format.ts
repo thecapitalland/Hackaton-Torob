@@ -75,6 +75,12 @@ export function formatDistance(distanceM?: number | null): string {
   return `${faDigits(text)} کیلومتر`;
 }
 
+/** Floor labels are data ("2", "زیر", "منفی یک") - always render Persian digits. */
+export function faFloor(value?: string | number | null): string {
+  if (value === null || value === undefined) return "";
+  return faDigits(String(value).trim());
+}
+
 export function formatDays(days?: number | null): string {
   if (days === null || days === undefined) return "";
   if (days === 0) return "امروز";

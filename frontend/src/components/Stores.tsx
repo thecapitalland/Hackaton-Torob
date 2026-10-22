@@ -1,11 +1,13 @@
 import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { copy } from "../copy.fa";
-import { faDigits, formatDistance, formatPrice } from "../format";
+import { faDigits, faFloor, formatDistance, formatPrice } from "../format";
 import type { Shop } from "../types";
 import { Chip, Sheet } from "./ui";
 import { MapView } from "./MapView";
 import { DirectionsLinks } from "./DirectionsLinks";
+import { FairnessBadge, HagglePanel } from "./HagglePanel";
+import { cheaperAlert, medianLine } from "../lib/haggle";
 import { useBreakpoint } from "../hooks";
 import type { Market, RouteInfo, SlotLocation } from "../types";
 
@@ -62,6 +64,8 @@ export function StoreCard({
   route,
   onToggle,
   onOpenTransparency,
+  onAddToTrip,
+  addedToTrip = false,
 }: {
   shop: Shop;
   cheapest: boolean;
@@ -69,7 +73,11 @@ export function StoreCard({
   route?: RouteInfo | null;
   onToggle: () => void;
   onOpenTransparency: () => void;
+  onAddToTrip?: (shopId: string) => void;
+  addedToTrip?: boolean;
 }) {
+  const nearby = cheaperAlert(shop.haggle);
+  const leverage = shop.haggle?.leverage;
   return (
     <motion.div
       layout
@@ -94,11 +102,20 @@ export function StoreCard({
               <p className="text-[13.5px] font-bold text-brand-red">
                 {formatPrice(shop.price)} تومان
               </p>
-              {cheapest ? (
-                <p className="text-[10.5px] font-bold text-brand-green">{copy.stores.cheapest}</p>
-              ) : null}
+              <div className="mt-0.5 flex items-center justify-end gap-1">
+                {cheapest ? (
+                  <span className="text-[10.5px] font-bold text-brand-green">
+                    {copy.stores.cheapest}
+                  </span>
+                ) : null}
+                <FairnessBadge label={shop.haggle?.label} />
+              </div>
             </div>
           </div>
+
+          {shop.haggle ? (
+            <p className="mt-1 text-[10.5px] text-brand-gray">{medianLine(shop.haggle)}</p>
+          ) : null}
 
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
             <OpenBadge shop={shop} />
@@ -116,7 +133,7 @@ export function StoreCard({
             {shop.mall || shop.floor ? (
               <span className="text-[11px] text-brand-muted">
                 🏬 {shop.mall ?? ""}
-                {shop.floor ? ` · طبقه ${shop.floor}` : ""}
+                {shop.floor ? ` · طبقه ${faFloor(shop.floor)}` : ""}
               </span>
             ) : null}
           </div>
@@ -150,6 +167,30 @@ export function StoreCard({
           <div className="mt-2 border-t border-dashed border-brand-border pt-2">
             <DirectionsLinks lat={shop.lat} lon={shop.lon} />
           </div>
+
+          {selected && nearby && leverage ? (
+            <div className="mt-2 rounded-xl border border-brand-amber/50 bg-brand-yellow p-2.5">
+              <p className="text-[11.5px] leading-5 text-brand-text">💡 {nearby}</p>
+              {onAddToTrip ? (
+                <button
+                  type="button"
+                  onClick={() => onAddToTrip(leverage.shop_id)}
+                  disabled={addedToTrip}
+                  className={`mt-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold ${
+                    addedToTrip
+                      ? "bg-brand-green/10 text-brand-green"
+                      : "bg-brand-green text-white"
+                  }`}
+                >
+                  {addedToTrip
+                    ? `✓ ${copy.haggle.addedToRoute}`
+                    : `➕ ${copy.haggle.addToRoute}`}
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+
+          {selected && shop.haggle ? <HagglePanel haggle={shop.haggle} /> : null}
         </div>
       </div>
     </motion.div>
@@ -168,6 +209,8 @@ export function StoresSection({
   onAsk,
   onSort,
   sort,
+  onAddToTrip,
+  tripPicks = [],
 }: {
   shops: Shop[];
   market?: Market | null;
@@ -180,6 +223,8 @@ export function StoresSection({
   onAsk: () => void;
   onSort: (sort: SortKey) => void;
   sort: SortKey;
+  onAddToTrip?: (shopId: string) => void;
+  tripPicks?: string[];
 }) {
   const [tab, setTab] = useState<"list" | "map">("list");
   const [onlyOpen, setOnlyOpen] = useState(false);
@@ -281,6 +326,11 @@ export function StoresSection({
                 route={routes?.[shop.shop_id] ?? null}
                 onToggle={() => onToggle(shop.shop_id)}
                 onOpenTransparency={() => setTransparencyShop(shop)}
+                onAddToTrip={onAddToTrip}
+                addedToTrip={Boolean(
+                  shop.haggle?.leverage &&
+                    tripPicks.includes(shop.haggle.leverage.shop_id),
+                )}
               />
             ))}
           </div>

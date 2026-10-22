@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { faHours, formatPrice } from "../format";
+import { faFloor, faHours, formatPrice } from "../format";
 import type { Followup, Market, Shop, Trip } from "../types";
 import { categoryIcon } from "./category";
 import { bestConfirmedName } from "./followups";
+import { cheaperAlert, fairnessLabel, medianLine } from "./haggle";
 import { isShopInMarket, shopsInMarket } from "./market";
 import { buildTripLine } from "./trip";
+import type { Haggle } from "../types";
 
 function makeShop(overrides: Partial<Shop> = {}): Shop {
   return {
@@ -50,6 +52,19 @@ describe("formatPrice (P2.8)", () => {
     expect(formatPrice(3_150_000)).toBe("۳٬۱۵۰٬۰۰۰");
     expect(formatPrice(0)).toBe("۰");
     expect(formatPrice(null)).toBe("");
+  });
+});
+
+describe("faFloor (QA2)", () => {
+  it("renders floor numbers with Persian digits", () => {
+    expect(faFloor("2")).toBe("۲");
+    expect(faFloor(5)).toBe("۵");
+  });
+
+  it("keeps non-numeric floor labels and empty values", () => {
+    expect(faFloor("زیرهمکف")).toBe("زیرهمکف");
+    expect(faFloor(null)).toBe("");
+    expect(faFloor(undefined)).toBe("");
   });
 });
 
@@ -98,6 +113,22 @@ describe("bestConfirmedName (P1.5)", () => {
     expect(bestConfirmedName(followups)).toBe("مهریسا نوین");
   });
 
+  it("prefers the cheapest negotiated confirmed price", () => {
+    const followups = [
+      makeFollowup({
+        shop_id: "countered",
+        name: "گران‌تر",
+        parsed: { availability: "available", confidence: 0.9, price_toman: 3_300_000 },
+      }),
+      makeFollowup({
+        shop_id: "accepted",
+        name: "ارزان‌تر",
+        parsed: { availability: "available", confidence: 0.9, price_toman: 2_740_000 },
+      }),
+    ];
+    expect(bestConfirmedName(followups)).toBe("ارزان‌تر");
+  });
+
   it("returns null when nobody confirmed", () => {
     expect(bestConfirmedName([makeFollowup()])).toBeNull();
   });
@@ -120,6 +151,56 @@ describe("market filtering (P1.6)", () => {
       "inside",
     ]);
     expect(shopsInMarket([inside, outside], null)).toHaveLength(2);
+  });
+});
+
+describe("haggle badges and alert (Phase 2)", () => {
+  const haggle: Haggle = {
+    label: "expensive",
+    median: 2_990_000,
+    q1: 2_740_000,
+    min: 1_390_000,
+    n_shops: 27,
+    target: 2_740_000,
+    ceiling: 2_990_000,
+    saving_pct: 28.8,
+    leverage: {
+      shop_id: "shop_cheap",
+      name: "نیکینا رووش",
+      price: 2_680_000,
+      delta_m: 180,
+      distance_m: 320,
+      same_mall: true,
+      saving: 1_170_000,
+    },
+    lines: ["خط اول", "خط دوم"],
+  };
+
+  it("maps fairness labels to Persian badges", () => {
+    expect(fairnessLabel("expensive")).toEqual({ text: "گرون", tone: "danger" });
+    expect(fairnessLabel("normal")).toEqual({ text: "معمولی", tone: "muted" });
+    expect(fairnessLabel("good")).toEqual({ text: "خوب قیمت", tone: "success" });
+    expect(fairnessLabel("single")).toEqual({ text: "بدون مقایسه", tone: "neutral" });
+  });
+
+  it("formats the median line with Persian digits", () => {
+    expect(medianLine(haggle)).toBe("میانه ۲۷ فروشگاه: ۲٬۹۹۰٬۰۰۰");
+    expect(medianLine({ ...haggle, label: "single", n_shops: 1 })).toContain(
+      "فقط یک فروشگاه",
+    );
+  });
+
+  it("formats the cheaper-nearby alert with real name, distance and saving", () => {
+    const alert = cheaperAlert(haggle);
+    expect(alert).toContain("۱۸۰ متر");
+    expect(alert).toContain("نیکینا رووش");
+    expect(alert).toContain("۱٬۱۷۰٬۰۰۰");
+    expect(alert).toContain("ارزون‌تره");
+    expect(alert).not.toMatch(/[0-9]/);
+  });
+
+  it("returns no alert without a cheaper shop", () => {
+    expect(cheaperAlert({ ...haggle, leverage: null })).toBeNull();
   });
 });
 

@@ -99,7 +99,7 @@ def recommend_messages(payload: dict) -> list[dict]:
 # §4 plan_contact
 # --------------------------------------------------------------------------
 
-PLAN_CONTACT_SYSTEM = """تو تربچه‌ای و از طرف خریدار به فروشگاه پیام کوتاه می‌دهی. مؤدب، کوتاه (حداکثر ۴۰ کلمه)، با معرفی «دستیار تربچه»، نام دقیق محصول/مدل، و این سؤال‌ها: موجودی امروز، قیمت نهایی حضوری، ساعت کاری؛ اگر installment=true بپرس «اقساطی/ترب‌پی دارید؟». هیچ اطلاعات شخصی خریدار نده.
+PLAN_CONTACT_SYSTEM = """تو تربچه‌ای و از طرف خریدار به فروشگاه پیام کوتاه می‌دهی. مؤدب، کوتاه (حداکثر ۴۰ کلمه)، با معرفی «دستیار تربچه»، نام دقیق محصول/مدل، و این سؤال‌ها: موجودی امروز، قیمت نهایی حضوری، ساعت کاری؛ اگر installment=true بپرس «اقساطی/ترب‌پی دارید؟». اگر target_price_text در ورودی بود، دقیقاً همین عدد را در یک سؤال مؤدبانه بیاور (مثلاً «با ۲٬۹۰۰٬۰۰۰ حضوری می‌دید؟»). هیچ عدد یا قیمت دیگری نساز و هیچ اطلاعات شخصی خریدار نده.
 خروجی: {"message":"..."}"""
 
 
@@ -111,12 +111,32 @@ def plan_contact_messages(payload: dict) -> list[dict]:
 
 
 # --------------------------------------------------------------------------
-# §5 parse_replies
+# §5 haggle
+# --------------------------------------------------------------------------
+
+HAGGLE_SYSTEM = """تو «تربچه» هستی و برای خریدار یک تحلیل کوتاه چانه‌زنی حضوری می‌نویسی. خروجی: {"lines":["...","..."]} با ۲ تا ۳ جملهٔ کوتاه فارسی (هر جمله حداکثر ۱۸ کلمه).
+قواعد سخت:
+۱) فقط از داده‌های ورودی استفاده کن: نام فروشگاه، قیمت، فاصله، هدف، سقف، میانه. هیچ عدد یا فروشگاهی از خودت نساز.
+۲) اگر leverage هست، نام همان فروشگاه و قیمت و فاصلهٔ داده‌شده را بیاور؛ جملهٔ دوم سؤال مؤدبانه با target_text باشد.
+۳) قیمت‌ها را با ارقام فارسی و همان متن‌های price_text بنویس؛ از «تومان» استفاده کن.
+۴) از ادعای اصالت، موجودی یا تخفیف قطعی خودداری کن؛ لحن پیشنهاد حضوری باشد.
+۵) اگر leverage نیست، فقط بگو قیمت نسبت به میانه/تنها فروشگاه کجاست و سقف را بگو."""
+
+
+def haggle_messages(payload: dict) -> list[dict]:
+    return [
+        {"role": "system", "content": HAGGLE_SYSTEM},
+        {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+    ]
+
+
+# --------------------------------------------------------------------------
+# §6 parse_replies
 # --------------------------------------------------------------------------
 
 PARSE_REPLIES_SYSTEM = """پاسخ خام فروشنده را به JSON تبدیل کن:
-{"availability":"available|unavailable|unclear","price_toman":عدد یا null,"price_changed":bool,"hours_text":string|null,"alternative":string|null,"installment":bool|null,"confidence":0..1}
-«۳ میلیون و ۱۵۰» = 3150000؛ «تومن» = تومان؛ «تموم شده/نداریم» = unavailable؛ «چک می‌کنم» = unclear. price_changed اگر قیمت با {offer_price} بیش از ۲٪ فرق دارد. اگر مطمئن نیستی confidence پایین بده و حدس نزن."""
+{"availability":"available|unavailable|unclear","price_toman":عدد یا null,"price_changed":bool,"hours_text":string|null,"alternative":string|null,"installment":bool|null,"confidence":0..1,"offer_status":"accepted|countered|none","counter_price":عدد یا null}
+«۳ میلیون و ۱۵۰» = 3150000؛ «تومن» = تومان؛ «تموم شده/نداریم» = unavailable؛ «چک می‌کنم» = unclear. price_changed اگر قیمت با {offer_price} بیش از ۲٪ فرق دارد. اگر فروشنده با قیمت هدف موافقت کرد offer_status=accepted و price_toman همان قیمت هدف است؛ اگر پیشنهاد متقابل داد offer_status=countered و counter_price عدد پیشنهاد فروشنده است (price_toman هم همان). اگر مطمئن نیستی confidence پایین بده و حدس نزن."""
 
 
 def parse_replies_messages(payload: dict) -> list[dict]:

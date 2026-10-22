@@ -13,6 +13,14 @@ def test_saffron_is_not_found_and_maps_to_spice_market():
     assert market["market_id"] == "gb_spice"
 
 
+def test_ooc_header_term_strips_fillers():
+    assert ooc.product_term("زعفران میخوام") == "زعفران"
+    assert ooc.product_term("زعفران می‌خوام") == "زعفران"
+    assert ooc.product_term("یه زعفران لازم دارم") == "زعفران"
+    assert ooc.product_term("میخوام زعفران بخرم") == "زعفران"
+    assert ooc.product_term("زعفران و ادویه فله") == "زعفران و ادویه فله"
+
+
 def test_saffron_alone_maps_to_spice_market_with_filler_words():
     market = ooc.match_external_market("زعفران می‌خوام لطفا")
     assert market is not None

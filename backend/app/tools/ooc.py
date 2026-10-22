@@ -36,6 +36,10 @@ FILLER_WORDS = {
     "لطفاً",
     "دنبال",
     "هستم",
+    "لازم",
+    "دارم",
+    "می‌خواستم",
+    "میخواستم",
     "بخرم",
     "خرید",
     "کجا",
@@ -65,6 +69,16 @@ def clean_query(query: str) -> str:
     normalized = normalize(query)
     tokens = [token for token in normalized.split() if token and token not in FILLER_WORDS]
     return " ".join(tokens)
+
+
+def product_term(query: str) -> str:
+    """The clean product term shown in the OOC header.
+
+    «زعفران می‌خوام», «یه زعفران لازم دارم» and «زعفران بخرم» all become
+    «زعفران»; the raw sentence is never repeated in the header.
+    """
+    cleaned = clean_query(query)
+    return " ".join(cleaned.split()) or normalize(query)
 
 
 def match_external_market(query: str) -> dict | None:

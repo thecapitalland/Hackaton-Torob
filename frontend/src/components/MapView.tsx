@@ -11,6 +11,8 @@ import {
 import L from "leaflet";
 import type { Market, Shop, SlotLocation } from "../types";
 import { faDigits, formatDistance, formatPrice } from "../format";
+import { FairnessBadge } from "./HagglePanel";
+import { medianLine } from "../lib/haggle";
 
 const OSM_URL = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
 const OSM_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
@@ -31,6 +33,33 @@ function Recenter({ center }: { center: [number, number] }) {
   useEffect(() => {
     map.setView(center, 14);
   }, [center, map]);
+  return null;
+}
+
+/**
+ * Leaflet measures its container once on mount.  Inside a flex pane or a
+ * bottom sheet that happens before the final layout, which used to leave the
+ * desktop map at ~2px (blank tiles, no markers).  Re-measure after mount, on
+ * window resize and whenever the container itself changes size.
+ */
+function MapResize() {
+  const map = useMap();
+  useEffect(() => {
+    const invalidate = () => map.invalidateSize();
+    const timer = window.setTimeout(invalidate, 0);
+    window.addEventListener("resize", invalidate);
+    let observer: ResizeObserver | null = null;
+    const parent = map.getContainer().parentElement;
+    if (typeof ResizeObserver !== "undefined" && parent) {
+      observer = new ResizeObserver(invalidate);
+      observer.observe(parent);
+    }
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("resize", invalidate);
+      observer?.disconnect();
+    };
+  }, [map]);
   return null;
 }
 
@@ -101,14 +130,15 @@ export function MapView({
     null;
 
   return (
-    <div className="relative">
+    <div className={`relative w-full ${className}`}>
       <MapContainer
         center={mapCenter}
         zoom={14}
         scrollWheelZoom
-        className={`${className} w-full rounded-card border border-brand-border`}
+        className="h-full w-full rounded-card border border-brand-border"
         style={{ zIndex: 0 }}
       >
+      <MapResize />
       <Recenter center={mapCenter} />
       <TileLayer
         url={tileUrl}
@@ -177,8 +207,25 @@ export function MapView({
               <strong>{shop.name}</strong>
               <br />
               {formatPrice(shop.price)} تومان
+              {shop.mall || shop.floor ? (
+                <>
+                  <br />
+                  🏬 {shop.mall ?? ""}
+                  {shop.floor ? ` · طبقه ${faDigits(shop.floor)}` : ""}
+                </>
+              ) : null}
               <br />
               {shop.open_text}
+              {shop.haggle ? (
+                <>
+                  <br />
+                  <FairnessBadge label={shop.haggle.label} className="mt-1" />
+                  <br />
+                  <span style={{ fontSize: 10.5, color: "#6F6E69" }}>
+                    {medianLine(shop.haggle)}
+                  </span>
+                </>
+              ) : null}
             </div>
           </Popup>
         </Marker>

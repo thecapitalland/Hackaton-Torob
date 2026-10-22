@@ -324,7 +324,8 @@ def clarify_fallback(missing: list[str]) -> dict:
 # --------------------------------------------------------------------------
 
 PRICE_PATTERNS = [
-    re.compile(r"(\d+(?:[\.,٫]\d+)?)\s*میلیون\s*و\s*(\d+)\s*هزار"),
+    # «۳ میلیون و ۱۵۰» (the way it is said in a shop) = 3,150,000
+    re.compile(r"(\d+(?:[\.,٫]\d+)?)\s*میلیون\s*و\s*(\d+)(?:\s*هزار)?"),
     re.compile(r"(\d+(?:[\.,٫]\d+)?)\s*میلیون"),
     re.compile(r"(\d+(?:[\.,٫]\d+)?)\s*هزار"),
     re.compile(r"(\d+(?:[\.,٫]\d+)?)\s*(?:تومن|تومان)"),
@@ -351,6 +352,33 @@ def parse_price(text: str) -> int | None:
     return None
 
 
+def parse_prices(text: str) -> list[int]:
+    """All prices in a reply (needed for accept/counter messages).
+
+    A counter reply contains both the buyer's target and the seller's number,
+    so taking the first price would report the target as the negotiated price.
+    """
+    normalized = normalize(text)
+    values: list[int] = []
+    for match in re.finditer(
+        r"(\d+(?:[\.,٫]\d+)?)\s*میلیون(?:\s*و\s*(\d+)(?:\s*هزار)?)?", normalized
+    ):
+        value = int(_number(match.group(1)) * 1_000_000)
+        if match.group(2):
+            value += int(match.group(2)) * 1_000
+        values.append(value)
+    for match in re.finditer(r"(\d+(?:[\.,٫]\d+)?)\s*هزار", normalized):
+        values.append(int(_number(match.group(1)) * 1_000))
+    for match in re.finditer(r"(\d{6,})\s*(?:تومن|تومان)?", normalized):
+        values.append(int(match.group(1)))
+    # keep the original order, remove duplicates
+    return list(dict.fromkeys(value for value in values if value > 0))
+
+
+COUNTER_WORDS = ("کمه", "آخرین قیمت", "نمی‌تونم", "نمی تونم", "بیشتر از", "تخفیف بیشتر")
+ACCEPT_WORDS = ("اوکیه", "قبوله", "قبول", "موافقم", "حله")
+
+
 def parse_reply(text: str, offer_price: int | None = None) -> dict:
     """Rule based seller reply parsing."""
     normalized = normalize(text or "")
@@ -370,7 +398,21 @@ def parse_reply(text: str, offer_price: int | None = None) -> dict:
                 availability = "unclear"
                 break
 
-    price = parse_price(text)
+    prices = parse_prices(text)
+    offer_status = "none"
+    counter = None
+    if any(normalize(word) in normalized for word in COUNTER_WORDS):
+        offer_status = "countered"
+        # target + counter are both in the sentence; the seller's number is
+        # the highest one
+        price = max(prices) if prices else parse_price(text)
+        counter = price
+    elif any(normalize(word) in normalized for word in ACCEPT_WORDS):
+        offer_status = "accepted"
+        price = max(prices) if prices else parse_price(text)
+    else:
+        price = parse_price(text)
+
     price_changed = False
     if price and offer_price:
         price_changed = abs(price - offer_price) / offer_price > 0.02
@@ -396,7 +438,86 @@ def parse_reply(text: str, offer_price: int | None = None) -> dict:
         "alternative": None,
         "installment": None,
         "confidence": 0.8 if availability != "unclear" else 0.45,
+        "offer_status": offer_status,
+        "counter_price": counter,
     }
+
+
+# --------------------------------------------------------------------------
+# money / distance formatting (shared with haggle fallbacks)
+# --------------------------------------------------------------------------
+
+
+def price_fa(value) -> str:
+    """3150000 -> «۳٬۱۵۰٬۰۰۰» (never Latin digits)."""
+    if value in (None, ""):
+        return ""
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return ""
+    return fa_digits(f"{number:,}".replace(",", "٬"))
+
+
+def distance_fa(value) -> str:
+    """200 -> «۲۰۰ متر», 1250 -> «۱٫۲ کیلومتر»."""
+    if value in (None, ""):
+        return ""
+    try:
+        meters = int(round(float(value)))
+    except (TypeError, ValueError):
+        return ""
+    if meters < 1000:
+        return f"{fa_digits(str(meters))} متر"
+    text = f"{meters / 1000:.1f}".replace(".", "٫")
+    return f"{fa_digits(text)} کیلومتر"
+
+
+# --------------------------------------------------------------------------
+# haggle lines (deterministic)
+# --------------------------------------------------------------------------
+
+
+def haggle_lines(
+    option: dict,
+    stats: dict,
+    leverage: dict | None,
+    target: int,
+    ceiling: int,
+) -> list[str]:
+    """Two or three short negotiation lines using only real data."""
+    price = int((option or {}).get("price") or 0)
+    n_shops = int((stats or {}).get("n_shops") or 0)
+    median = (stats or {}).get("median") or 0
+    lines: list[str] = []
+
+    if leverage:
+        distance = leverage.get("delta_m") or leverage.get("distance_m")
+        where = "توی همین پاساژ" if leverage.get("same_mall") else "همین نزدیکی"
+        first = (
+            f"همین مدل رو «{leverage.get('name')}» "
+            f"{price_fa(leverage.get('price'))} می‌ده"
+        )
+        if distance:
+            first += f"، {distance_fa(distance)} اون‌طرف‌تر"
+        first += f" ({where})."
+        lines.append(first)
+    elif n_shops < 2:
+        lines.append("مقایسه ممکن نیست؛ فقط یک فروشگاه این مدل را دارد.")
+
+    if target and target < price:
+        lines.append(f"«با {price_fa(target)} حضوری می‌دید؟»")
+    elif n_shops >= 2:
+        lines.append(
+            f"قیمتت از میانهٔ {fa_digits(str(n_shops))} فروشگاه "
+            f"({price_fa(median)}) پایین‌تره؛ روی گارانتی و فاکتور چانه بزن."
+        )
+
+    if ceiling and len(lines) < 3:
+        lines.append(f"سقف خرید: {price_fa(ceiling)}؛ بالاتر نرو.")
+    if not lines:
+        lines.append("قیمت نهایی را قبل از پرداخت حضوری تأیید کن.")
+    return lines[:3]
 
 
 # --------------------------------------------------------------------------
@@ -409,6 +530,7 @@ def draft_message(
     shop_names: list[str],
     installment: bool = False,
     today: bool = False,
+    target_price: int | None = None,
 ) -> str:
     """Fallback message the agent would send to the shop."""
     parts = [
@@ -421,6 +543,8 @@ def draft_message(
     else:
         parts.append("موجوده؟")
     parts.append("قیمت نهایی برای خرید حضوری چنده؟")
+    if target_price:
+        parts.append(f"با {price_fa(target_price)} حضوری می‌دید؟")
     parts.append("تا چه ساعتی بازید؟")
     if installment:
         parts.append("اقساطی/ترب‌پی دارید؟")

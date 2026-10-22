@@ -1,6 +1,6 @@
 import { motion } from "framer-motion";
 import { copy } from "../copy.fa";
-import { faDigits, formatDistance } from "../format";
+import { faDigits, formatDistance, formatPrice } from "../format";
 import { buildTripLine } from "../lib/trip";
 import type { RouteInfo, Trip } from "../types";
 import { MapView } from "./MapView";
@@ -55,6 +55,7 @@ export function TripPlan({ trip, route }: { trip: Trip; route?: RouteInfo | null
             </p>
             <p className="text-[11.5px] text-brand-gray">
               {stop.arrive_hint || stop.address}
+              {stop.price ? ` · ${formatPrice(stop.price)} ${copy.haggle.toman}` : ""}
               {route && !route.estimated && stop === first
                 ? ` · ${faDigits(route.duration_min)} دقیقه پیاده (${copy.stores.realRoute})`
                 : stop.walk_min_est
@@ -83,7 +84,12 @@ export function TripPlan({ trip, route }: { trip: Trip; route?: RouteInfo | null
         {trip.backup ? (
           <li className="relative">
             <span className="absolute -right-[26px] top-0.5 h-3 w-3 rounded-full bg-brand-gray" />
-            <p className="text-[13px] font-bold">🅱️ {copy.trip.backup}: {trip.backup.name}</p>
+            <p className="text-[13px] font-bold">
+              🅱️ {copy.trip.backup}: {trip.backup.name}
+              {trip.backup.price
+                ? ` · ${formatPrice(trip.backup.price)} ${copy.haggle.toman}`
+                : ""}
+            </p>
           </li>
         ) : null}
       </ol>

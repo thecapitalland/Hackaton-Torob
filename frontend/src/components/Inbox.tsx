@@ -3,7 +3,8 @@ import { AnimatePresence, motion } from "framer-motion";
 import { copy } from "../copy.fa";
 import { faDigits, formatPrice } from "../format";
 import { bestConfirmedName } from "../lib/followups";
-import type { Followup } from "../types";
+import type { Followup, Shop } from "../types";
+import { HagglePanel } from "./HagglePanel";
 
 function ParsedChip({ followup }: { followup: Followup }) {
   const parsed = followup.parsed;
@@ -19,6 +20,21 @@ function ParsedChip({ followup }: { followup: Followup }) {
     return (
       <span className="inline-flex items-center gap-1 rounded-full bg-brand-red/10 px-2.5 py-1 text-[11.5px] font-bold text-brand-red">
         {copy.inbox.unavailable}
+      </span>
+    );
+  }
+  if (parsed.offer_status === "accepted" && parsed.price_toman) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-brand-green/10 px-2.5 py-1 text-[11.5px] font-bold text-brand-green">
+        ✅ {copy.inbox.accepted} {formatPrice(parsed.price_toman)} {copy.inbox.agreed}
+      </span>
+    );
+  }
+  if (parsed.offer_status === "countered") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-brand-amber/15 px-2.5 py-1 text-[11.5px] font-bold text-brand-amber">
+        🤝 {copy.inbox.counterOffer}:{" "}
+        {formatPrice(parsed.counter_price ?? parsed.price_toman)} {copy.haggle.toman}
       </span>
     );
   }
@@ -69,7 +85,7 @@ function CallCard({ followup }: { followup: Followup }) {
   );
 }
 
-function Thread({ followup }: { followup: Followup }) {
+function Thread({ followup, shop }: { followup: Followup; shop?: Shop }) {
   const [showReply, setShowReply] = useState(false);
 
   useEffect(() => {
@@ -128,21 +144,26 @@ function Thread({ followup }: { followup: Followup }) {
         <ParsedChip followup={followup} />
         {followup.status === "no_response" ? <CallCard followup={followup} /> : null}
       </div>
+
+      {shop?.haggle ? <HagglePanel haggle={shop.haggle} compact /> : null}
     </div>
   );
 }
 
 export function Inbox({
   followups,
+  shops = [],
   onPlanTrip,
 }: {
   followups: Followup[];
+  shops?: Shop[];
   onPlanTrip: () => void;
 }) {
   const confirmed = followups.filter(
     (followup) => followup.parsed?.availability === "available",
   ).length;
   const bestName = bestConfirmedName(followups);
+  const shopsById = new Map(shops.map((shop) => [shop.shop_id, shop]));
 
   if (!followups.length) return null;
 
@@ -168,7 +189,11 @@ export function Inbox({
 
       <AnimatePresence>
         {followups.map((followup) => (
-          <Thread key={followup.shop_id} followup={followup} />
+          <Thread
+            key={followup.shop_id}
+            followup={followup}
+            shop={shopsById.get(followup.shop_id)}
+          />
         ))}
       </AnimatePresence>
     </section>

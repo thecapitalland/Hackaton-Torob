@@ -55,6 +55,7 @@ export default function App() {
   const [followups, setFollowups] = useState<Followup[]>([]);
   const [trip, setTrip] = useState<Trip | null>(null);
   const [selectedShops, setSelectedShops] = useState<string[]>([]);
+  const [tripPicks, setTripPicks] = useState<string[]>([]);
   const [sort, setSort] = useState<SortKey>("recommended");
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -226,6 +227,7 @@ export default function App() {
       if (!sessionId || busy) return;
       setBusy(true);
       setSelectedShops([]);
+      if (productId !== product?.product_id) setTripPicks([]);
       setRoutes({});
       setTripRoute(null);
       routesKeyRef.current = null;
@@ -239,7 +241,7 @@ export default function App() {
         setBusy(false);
       }
     },
-    [applyResponse, busy, handleError, sessionId, sort],
+    [applyResponse, busy, handleError, product?.product_id, sessionId, sort],
   );
 
   const askShops = useCallback(async () => {
@@ -278,25 +280,33 @@ export default function App() {
 
   const planTrip = useCallback(async () => {
     if (!sessionId) return;
-    const ids = followups
+    const confirmed = followups
       .filter((followup) => followup.parsed?.availability === "available")
       .map((followup) => followup.shop_id);
+    const chosen = [...new Set([...confirmed, ...tripPicks])];
     const fallback = selectedShops.length ? selectedShops : shops.slice(0, 1).map((s) => s.shop_id);
     setBusy(true);
     try {
-      const response = await api.trip(sessionId, ids.length ? ids : fallback);
+      const response = await api.trip(sessionId, chosen.length ? chosen : fallback);
       applyResponse(response);
     } catch (error) {
       handleError(error);
     } finally {
       setBusy(false);
     }
-  }, [applyResponse, followups, handleError, selectedShops, sessionId, shops]);
+  }, [applyResponse, followups, handleError, selectedShops, sessionId, shops, tripPicks]);
 
   const toggleShop = (shopId: string) => {
     setSelectedShops((prev) =>
       prev.includes(shopId) ? prev.filter((id) => id !== shopId) : [...prev, shopId],
     );
+  };
+
+  // «اضافه به مسیر» from the cheaper-nearby alert: keep a separate list so a
+  // shop can be on the trip even if it was never messaged.
+  const addToTrip = (shopId: string) => {
+    setTripPicks((prev) => (prev.includes(shopId) ? prev : [...prev, shopId]));
+    setToast(copy.haggle.addedToRoute);
   };
 
   const useMyLocation = () => {
@@ -512,11 +522,13 @@ export default function App() {
                       if (product?.product_id) selectProduct(product.product_id);
                     }}
                     sort={sort}
+                    onAddToTrip={addToTrip}
+                    tripPicks={tripPicks}
                   />
                 ) : null}
 
                 {followups.length ? (
-                  <Inbox followups={followups} onPlanTrip={planTrip} />
+                  <Inbox followups={followups} shops={shops} onPlanTrip={planTrip} />
                 ) : null}
 
                 {trip ? <TripPlan trip={trip} route={tripRoute} /> : null}
