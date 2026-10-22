@@ -137,6 +137,9 @@ def rank_shops(options: list[dict], slots: dict | None = None, now=None) -> list
 
         score = sum(weights[key] * value for key, value in parts.items())
         option["score"] = round(min(1.0, max(0.0, score)), 3)
+        # B3: «ارزان‌ترین قیمت» only makes sense on the actual cheapest shop
+        is_cheapest = option.get("price") == min_price
+        good_price = (option.get("haggle") or {}).get("label") == "good"
         contributions = sorted(
             (
                 (weights[key] * value, key)
@@ -145,7 +148,11 @@ def rank_shops(options: list[dict], slots: dict | None = None, now=None) -> list
             ),
             reverse=True,
         )
-        option["why"] = " + ".join(LABELS[key] for _, key in contributions[:2]) or "تنها گزینهٔ موجود"
+        labels = [
+            LABELS[key] if key != "price" else ("ارزان‌ترین قیمت" if is_cheapest or good_price else "قیمت مناسب")
+            for _, key in contributions[:2]
+        ]
+        option["why"] = " + ".join(labels) or "تنها گزینهٔ موجود"
 
     options.sort(key=lambda option: (-option["score"], option.get("price") or 0))
     return options

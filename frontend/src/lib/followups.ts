@@ -1,6 +1,16 @@
 import type { Followup } from "../types";
 
 /**
+ * Whether a «برنامهٔ رفتن رو بچین» entry point must be reachable (B2).
+ *
+ * With no confirming shop the trip planning entry must not disappear: picks
+ * added directly from the cheaper-nearby alerts still deserve a route plan.
+ */
+export function tripPlanningReachable(confirmed: number, tripPicks: number): boolean {
+  return confirmed > 0 || tripPicks > 0;
+}
+
+/**
  * Name of the best shop that confirmed availability.
  *
  * When a shop accepted the target or countered, `parsed.price_toman` is the

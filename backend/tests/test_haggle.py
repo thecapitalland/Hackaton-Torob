@@ -172,6 +172,16 @@ def test_leverage_returns_none_when_no_shop_is_cheaper():
     assert haggle.leverage_shop(option, [option, other]) is None
 
 
+def test_leverage_ignores_price_outliers():
+    """A suspiciously-low offer (far below the market median) is not leverage."""
+    option = _option(price=3_800_000)
+    real = _option(shop_id="real", name="واقعی", price=2_900_000)
+    outlier = _option(shop_id="outlier", name="مشکوک", price=890_000, distance_m=50)
+    result = haggle.leverage_shop(option, [option, outlier, real])
+    assert result is not None
+    assert result["shop_id"] == "real"
+
+
 # --------------------------------------------------------------------------
 # deterministic lines and LLM guard
 # --------------------------------------------------------------------------
@@ -343,8 +353,60 @@ def test_plan_contact_asks_the_computed_target_price(catalog_path):
     state = graph.find_stores(
         {"product_id": R50I, "slots": {"installment": False, "today": True}}
     )
-    state["shop_ids"] = [MEHRISA, AVAN, CHEAP]
+    state["shop_ids"] = [MEHRISA, AVAN]
     plan = graph.plan_contact(state)
     message = plan["draft_message"]
     assert "با ۲٬۷۴۰٬۰۰۰ حضوری می‌دید؟" in message
     assert all(target["target_price"] for target in plan["draft_targets"])
+
+
+def test_plan_contact_per_shop_target_messages(catalog_path):
+    """B1: each shop is asked about its own target — never about another shop's."""
+    state = graph.find_stores(
+        {"product_id": R50I, "slots": {"installment": False, "today": True}}
+    )
+    state["shop_ids"] = [MEHRISA, AVAN, CHEAP]
+    plan = graph.plan_contact(state)
+    by_id = {target["shop_id"]: target for target in plan["draft_targets"]}
+
+    mehrisa, avan, cheap = by_id[MEHRISA], by_id[AVAN], by_id[CHEAP]
+    assert "۲٬۷۴۰٬۰۰۰" in mehrisa["message"]
+    assert "۲٬۷۴۰٬۰۰۰" in avan["message"]
+    # the cheap shop (1,390,000) must NOT be asked about the 2,740,000 target
+    assert cheap["target_price"] is None
+    assert "۲٬۷۴۰٬۰۰۰" not in cheap["message"]
+
+
+def test_plan_contact_skips_question_when_target_reaches_price(catalog_path):
+    """B1: no target question when target >= shop price (cheap shop is already fine)."""
+    state = graph.find_stores(
+        {"product_id": R50I, "slots": {"installment": False, "today": True}}
+    )
+    state["shop_ids"] = [CHEAP]
+    plan = graph.plan_contact(state)
+    target = plan["draft_targets"][0]
+    assert target["target_price"] is None
+    assert "حضوری می‌دید؟" not in target["message"]
+
+
+def test_plan_contact_per_shop_messages_reach_followups(catalog_path):
+    """B1: send_messages uses each shop's own message, not a shared one."""
+    state = graph.find_stores(
+        {"product_id": R50I, "slots": {"installment": False, "today": True}}
+    )
+    state["shop_ids"] = [MEHRISA, CHEAP]
+    plan = plan_state = graph.plan_contact(state)
+    state["approval"] = {
+        "approved": True,
+        "shop_ids": [MEHRISA, CHEAP],
+        "messages": {
+            target["shop_id"]: target.get("message") or ""
+            for target in plan_state["draft_targets"]
+        },
+    }
+    state.update(plan)
+    result = graph.send_messages(state)
+    by_id = {f["shop_id"]: f for f in result["followups"]}
+    assert "۲٬۷۴۰٬۰۰۰" in by_id[MEHRISA]["message"]
+    # the cheap shop must not receive another shop's target
+    assert "۲٬۷۴۰٬۰۰۰" not in by_id[CHEAP]["message"]

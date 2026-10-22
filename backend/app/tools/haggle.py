@@ -152,6 +152,20 @@ def leverage_shop(option: dict, all_options: list[dict] | None) -> dict | None:
     option_mall = normalize(option.get("mall") or "")
     option_coords = _coords(option)
 
+    all_prices = sorted(p for p in (_price(other) for other in all_options or []) if p > 0)
+    if all_prices:
+        mid = len(all_prices) // 2
+        median_price = (
+            all_prices[mid]
+            if len(all_prices) % 2
+            else (all_prices[mid - 1] + all_prices[mid]) / 2
+        )
+    else:
+        median_price = 0
+    # an offer far below the market median is usually a data outlier and is a
+    # poor leverage shop (پیشنهاد زیر ۵۰٪ میانه بیشتر شبیه خطای داده است)
+    floor_price = median_price * 0.5 if median_price else 0
+
     candidates: list[dict] = []
     for other in all_options or []:
         if other is option or not isinstance(other, dict):
@@ -160,6 +174,8 @@ def leverage_shop(option: dict, all_options: list[dict] | None) -> dict | None:
             continue
         other_price = _price(other)
         if other_price <= 0 or other_price >= price:
+            continue
+        if floor_price and other_price < floor_price:
             continue
         other_mall = normalize(other.get("mall") or "")
         same_mall = bool(option_mall) and other_mall == option_mall

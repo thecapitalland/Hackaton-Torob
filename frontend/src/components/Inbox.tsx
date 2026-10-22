@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { copy } from "../copy.fa";
 import { faDigits, formatPrice } from "../format";
-import { bestConfirmedName } from "../lib/followups";
+import { bestConfirmedName, tripPlanningReachable } from "../lib/followups";
 import type { Followup, Shop } from "../types";
 import { HagglePanel } from "./HagglePanel";
 
@@ -154,16 +154,20 @@ export function Inbox({
   followups,
   shops = [],
   onPlanTrip,
+  tripPicks = [],
 }: {
   followups: Followup[];
   shops?: Shop[];
   onPlanTrip: () => void;
+  tripPicks?: string[];
 }) {
   const confirmed = followups.filter(
     (followup) => followup.parsed?.availability === "available",
   ).length;
   const bestName = bestConfirmedName(followups);
   const shopsById = new Map(shops.map((shop) => [shop.shop_id, shop]));
+  // B2: the trip entry stays reachable even with zero confirmations
+  const planReachable = tripPlanningReachable(confirmed, tripPicks.length);
 
   if (!followups.length) return null;
 
@@ -177,6 +181,22 @@ export function Inbox({
         >
           <p className="text-[13px] font-bold text-brand-green">
             {faDigits(confirmed)} فروشگاه تأیید کرد. پیشنهادم: {bestName ?? "—"} 🏆
+          </p>
+          <button
+            onClick={onPlanTrip}
+            className="mt-2 w-full rounded-xl bg-brand-green py-2.5 text-[13px] font-bold text-white"
+          >
+            {copy.inbox.planTrip}
+          </button>
+        </motion.div>
+      ) : planReachable ? (
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="rounded-2xl border border-brand-amber/40 bg-brand-amber/10 p-3"
+        >
+          <p className="text-[12.5px] font-bold text-brand-muted">
+            هنوز فروشگاهی تأیید نشده، ولی {faDigits(tripPicks.length)} فروشگاه هم‌مسیر شده.
           </p>
           <button
             onClick={onPlanTrip}

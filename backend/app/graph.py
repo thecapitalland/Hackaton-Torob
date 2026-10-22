@@ -890,61 +890,81 @@ def _pick_target_shops(state: AgentState) -> list[dict]:
     return sorted(shops, key=priority)[:3]
 
 
+def _target_question(target_price: int | None) -> str:
+    if target_price:
+        return f"با {_price_fa(target_price)} حضوری می‌دید؟"
+    return ""
+
+
 def plan_contact(state: AgentState) -> dict:
     started = time.time()
     slots = state.get("slots") or {}
     product = state.get("product") or {}
     targets = _pick_target_shops(state)
     title = product.get("persian_title") or "این مدل"
-    target_prices = [
-        int((target.get("haggle") or {}).get("target") or 0) for target in targets
-    ]
-    target_price = next((value for value in target_prices if value), None)
 
-    client = get_client()
+    target_infos = []
+    for target in targets:
+        price = int(target.get("price") or 0)
+        raw_target = int((target.get("haggle") or {}).get("target") or 0)
+        target_price = raw_target if raw_target and raw_target < price else None
+        target_infos.append(
+            {
+                "shop_id": target["shop_id"],
+                "name": target.get("name"),
+                "price": price,
+                "target_price": target_price,
+            }
+        )
+
+    # The LLM shapes the *common* part once; each shop's own target question is
+    # appended from data, so every shop is asked about its own real target.
     payload = {
         "product": title,
         "product_id": product.get("product_id"),
-        "shops": [
-            {
-                "shop_id": target["shop_id"],
-                "name": target.get("name"),
-                "price": target.get("price"),
-                "target_price": int((target.get("haggle") or {}).get("target") or 0) or None,
-            }
-            for target in targets
-        ],
-        "target_price": target_price,
-        "target_price_text": _price_fa(target_price),
+        "shops": target_infos,
+        "target_price": None,
+        "target_price_text": "",
         "installment": bool(slots.get("installment")),
         "today": bool(slots.get("today")),
     }
+    client = get_client()
     raw = client.chat_json(prompts.plan_contact_messages(payload))
-    message = ""
+    base = ""
     if raw:
         try:
-            message = PlanContactOut(**raw).message.strip()
+            base = PlanContactOut(**raw).message.strip()
         except ValidationError:
-            message = ""
-    if not message:
-        message = rules.draft_message(
-            title,
-            [t.get("name", "") for t in targets],
-            installment=bool(slots.get("installment")),
-            today=bool(slots.get("today")),
-            target_price=target_price,
-        )
+            base = ""
+    if base:
+        messages: list[str] = []
+        for info in target_infos:
+            question = _target_question(info["target_price"])
+            body = f"{base} {question}".strip() if question else base
+            messages.append(body)
+    else:
+        messages = [
+            rules.draft_message(
+                title,
+                [info["name"]],
+                installment=bool(slots.get("installment")),
+                today=bool(slots.get("today")),
+                target_price=info["target_price"],
+            )
+            for info in target_infos
+        ]
 
     return {
-        "draft_message": message,
+        "draft_message": messages[0] if messages else "",
         "draft_targets": [
             {
-                "shop_id": target["shop_id"],
-                "name": target.get("name"),
-                "price": target.get("price"),
-                "target_price": int((target.get("haggle") or {}).get("target") or 0) or None,
+                "shop_id": info["shop_id"],
+                "name": info["name"],
+                "price": info["price"],
+                "target_price": info["target_price"],
+                "message": messages[index],
             }
-            for target in targets
+            for index, info in enumerate(target_infos)
         ],
         "phase": "verify",
         "trace": [_trace("plan_contact", f"پیام برای {len(targets)} فروشگاه", started)],
@@ -981,11 +1001,15 @@ def send_messages(state: AgentState) -> dict:
     for target in targets:
         if allowed and target["shop_id"] not in allowed:
             continue
+        # B1: every shop gets its own message (its own target question)
+        target_message = (approval.get("messages") or {}).get(
+            target["shop_id"]
+        ) or target.get("message") or message
         followups.append(
             {
                 "shop_id": target["shop_id"],
                 "name": target.get("name"),
-                "message": message,
+                "message": target_message,
                 "status": "sent",
                 "simulated": True,
                 "raw_reply": None,
@@ -1155,7 +1179,20 @@ def build_trip(state: AgentState) -> dict:
         chosen = confirmed[:1] or shops[:1]
 
     stop_shop = chosen[0] if chosen else None
-    backup = chosen[1] if len(chosen) > 1 else None
+    # B5: the backup shop must not be one of the already picked stops
+    chosen_ids = [shop["shop_id"] for shop in chosen]
+    backup_candidates = [shop for shop in shops if shop["shop_id"] not in chosen_ids]
+    backup_rank = {"open": 0, "unknown": 1, "closed": 2}
+    backup = None
+    if backup_candidates:
+        def backup_key(shop: dict) -> tuple[int, int, float]:
+            verified = (parsed_by_shop.get(shop["shop_id"]) or {}).get("availability") == "available"
+            return (
+                0 if verified else 1,
+                backup_rank.get(shop.get("open_status"), 3),
+                -(shop.get("score") or 0),
+            )
+        backup = min(backup_candidates, key=backup_key)
 
     stops: list[dict] = []
     for index, shop in enumerate(chosen):
@@ -1224,7 +1261,11 @@ def build_trip(state: AgentState) -> dict:
             f"اول برو {first['name']}" if first else "برنامهٔ رفتن آماده نشد."
         )
         if first:
-            summary += " (موجودیش تأیید شده)"
+            # B2 honesty: only claim verified stock when it actually is
+            if first.get("verified"):
+                summary += " (موجودیش تأیید شده)"
+            else:
+                summary += " (موجودیش هنوز تأیید نشده، بپرس بعدش)"
             if first.get("walk_min_est"):
                 summary += f"؛ حدود {fa_digits(str(first['walk_min_est']))} دقیقه پیاده راه می‌فتهی (تخمینی)."
             if cafe:

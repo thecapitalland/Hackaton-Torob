@@ -48,7 +48,13 @@ export interface PendingQuestion {
 export interface PendingApproval {
   type: "approval";
   channel: string;
-  targets: { shop_id: string; name: string; price?: number }[];
+  targets: {
+    shop_id: string;
+    name: string;
+    price?: number;
+    target_price?: number | null;
+    message?: string;
+  }[];
   message: string;
   privacy_note?: string;
 }

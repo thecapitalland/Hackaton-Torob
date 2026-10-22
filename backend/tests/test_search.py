@@ -120,3 +120,84 @@ def test_three_laptop_candidates_produce_three_cards(catalog_path):
     cards = catalog.pick_cards(candidates, 500_000_000)
     assert len(cards) == 3
     assert [card["kind"] for card in cards] == ["best", "budget", "premium"]
+
+
+# --------------------------------------------------------------------------
+# B3: honest ranking «why»
+# --------------------------------------------------------------------------
+
+
+def test_why_labels_only_the_real_cheapest(catalog_path):
+    """B3: «ارزان‌ترین قیمت» must appear only on the actual cheapest shop."""
+    from app.tools import ranking
+
+    offers = catalog.get_offers_for_product(R50I)
+    slots = {"location": {"lat": 35.7, "lon": 51.42, "label": "آزمون"}}
+    options = ranking.build_shop_options(offers, slots, ranking_hours_now(), 27)
+    options = ranking.rank_shops(options, slots, ranking_hours_now())
+    prices = [option["price"] for option in options if option.get("price")]
+    cheapest = min(prices)
+    labelled = [
+        option for option in options if "ارزان‌ترین قیمت" in (option.get("why") or "")
+    ]
+    assert labelled
+    for option in labelled:
+        assert option["price"] == cheapest, (
+            option["name"],
+            option["price"],
+            option["why"],
+        )
+    others = [option for option in options if option["price"] != cheapest]
+    for option in others:
+        if option.get("haggle", {}).get("label") == "good":
+            continue
+        assert "ارزان‌ترین قیمت" not in (option.get("why") or ""), option["why"]
+
+
+def ranking_hours_now():
+    from app.tools.hours import now_tehran
+
+    return now_tehran()
+
+
+# --------------------------------------------------------------------------
+# B5: trip backup must not repeat a real stop
+# --------------------------------------------------------------------------
+
+
+def test_trip_backup_is_never_a_chosen_stop(catalog_path):
+    from app import graph
+
+    state = graph.find_stores(
+        {"product_id": R50I, "slots": {"installment": False, "today": True}}
+    )
+    shops = state.get("shops") or []
+    assert len(shops) >= 3
+    state["shop_ids"] = [shops[0]["shop_id"], shops[1]["shop_id"]]
+    result = graph.build_trip(state)
+    trip = result["trip"]
+    stop_ids = [stop["shop_id"] for stop in trip["stops"]]
+    if trip["backup"]:
+        assert trip["backup"]["shop_id"] not in stop_ids
+
+
+def test_trip_backup_prefers_a_verified_shop(catalog_path):
+    from app import graph
+
+    state = graph.find_stores(
+        {"product_id": R50I, "slots": {"installment": False, "today": True}}
+    )
+    shops = state.get("shops") or []
+    chosen = shops[0]
+    verified = next(shop for shop in shops[1:] if shop["price"])
+    state["shop_ids"] = [chosen["shop_id"]]
+    state["followups"] = [
+        {
+            "shop_id": verified["shop_id"],
+            "parsed": {"availability": "available", "offer_status": "confirmed"},
+        }
+    ]
+    result = graph.build_trip(state)
+    backup = result["trip"]["backup"]
+    assert backup, "expected a backup shop"
+    assert backup["shop_id"] == verified["shop_id"]

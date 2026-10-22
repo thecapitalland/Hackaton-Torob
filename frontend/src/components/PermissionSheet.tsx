@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { copy } from "../copy.fa";
-import { faDigits } from "../format";
+import { faDigits, formatPrice } from "../format";
 import type { PendingApproval } from "../types";
 import { Sheet } from "./ui";
 
@@ -21,15 +21,17 @@ export function PermissionSheet({
     approved: boolean;
     shop_ids: string[];
     message: string;
+    messages: Record<string, string>;
     channel: string;
   }) => void;
   onReject: () => void;
 }) {
-  const [message, setMessage] = useState<string | null>(null);
+  const [messages, setMessages] = useState<Record<string, string>>({});
   const [channel, setChannel] = useState("simulated_sms");
 
   if (!pending) return null;
-  const text = message ?? pending.message ?? "";
+  const textOf = (shopId: string, fallback: string | undefined) =>
+    messages[shopId] ?? fallback ?? pending.message ?? "";
 
   return (
     <Sheet
@@ -39,14 +41,19 @@ export function PermissionSheet({
       footer={
         <div className="flex gap-2">
           <button
-            onClick={() =>
+            onClick={() => {
+              const perShop: Record<string, string> = {};
+              for (const target of pending.targets) {
+                perShop[target.shop_id] = textOf(target.shop_id, target.message);
+              }
               onApprove({
                 approved: true,
                 shop_ids: pending.targets.map((target) => target.shop_id),
-                message: text,
+                message: perShop[pending.targets[0]?.shop_id ?? ""] ?? "",
+                messages: perShop,
                 channel,
-              })
-            }
+              });
+            }}
             className="flex-1 rounded-2xl bg-brand-green py-3 text-[14px] font-bold text-white"
           >
             {copy.permission.send}
@@ -81,12 +88,35 @@ export function PermissionSheet({
           <h4 className="mb-1.5 text-[12.5px] font-bold text-brand-muted">
             {copy.permission.message}
           </h4>
-          <textarea
-            value={text}
-            onChange={(event) => setMessage(event.target.value)}
-            rows={5}
-            className="w-full resize-none rounded-2xl border border-brand-border bg-brand-bg p-3 text-[13px] leading-6 outline-none focus:border-brand-red"
-          />
+          {/* B1: each shop gets its own message with its own target price */}
+          <div className="space-y-2">
+            {pending.targets.map((target) => (
+              <div
+                key={target.shop_id}
+                className="rounded-2xl border border-brand-border bg-brand-bg p-2.5"
+              >
+                <p className="mb-1 text-[11.5px] font-bold text-brand-muted">
+                  🏪 {target.name}
+                  {target.target_price ? (
+                    <span className="ms-1 font-medium">
+                      · هدف چانه: {formatPrice(target.target_price)}
+                    </span>
+                  ) : null}
+                </p>
+                <textarea
+                  value={textOf(target.shop_id, target.message)}
+                  onChange={(event) =>
+                    setMessages((prev) => ({
+                      ...prev,
+                      [target.shop_id]: event.target.value,
+                    }))
+                  }
+                  rows={3}
+                  className="w-full resize-none rounded-xl border border-brand-border bg-white p-2.5 text-[12.5px] leading-5 outline-none focus:border-brand-red"
+                />
+              </div>
+            ))}
+          </div>
         </div>
 
         <div>

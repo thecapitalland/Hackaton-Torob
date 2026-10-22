@@ -8,6 +8,7 @@ import { MapView } from "./MapView";
 import { DirectionsLinks } from "./DirectionsLinks";
 import { FairnessBadge, HagglePanel } from "./HagglePanel";
 import { cheaperAlert, medianLine } from "../lib/haggle";
+import { shopLocationLine } from "../lib/shop";
 import { useBreakpoint } from "../hooks";
 import type { Market, RouteInfo, SlotLocation } from "../types";
 
@@ -132,8 +133,7 @@ export function StoreCard({
             ) : null}
             {shop.mall || shop.floor ? (
               <span className="text-[11px] text-brand-muted">
-                🏬 {shop.mall ?? ""}
-                {shop.floor ? ` · طبقه ${faFloor(shop.floor)}` : ""}
+                🏬 {shopLocationLine(shop.mall, shop.floor)}
               </span>
             ) : null}
           </div>
@@ -210,6 +210,7 @@ export function StoresSection({
   onSort,
   sort,
   onAddToTrip,
+  onPlanTrip,
   tripPicks = [],
 }: {
   shops: Shop[];
@@ -224,6 +225,7 @@ export function StoresSection({
   onSort: (sort: SortKey) => void;
   sort: SortKey;
   onAddToTrip?: (shopId: string) => void;
+  onPlanTrip?: () => void;
   tripPicks?: string[];
 }) {
   const [tab, setTab] = useState<"list" | "map">("list");
@@ -313,6 +315,16 @@ export function StoresSection({
           {copy.stores.filterOpen}
         </Chip>
       </div>
+
+      {/* B2: even when no shop confirms, picks from the alerts must be usable */}
+      {tripPicks.length && onPlanTrip ? (
+        <button
+          onClick={onPlanTrip}
+          className="w-full rounded-2xl bg-brand-green py-3 text-[13.5px] font-bold text-white shadow-card"
+        >
+          🧭 {copy.inbox.planTrip} ({faDigits(tripPicks.length)} فروشگاه)
+        </button>
+      ) : null}
 
       {tab === "list" ? (
         filtered.length ? (

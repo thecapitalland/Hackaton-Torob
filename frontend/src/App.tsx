@@ -262,6 +262,7 @@ export default function App() {
       approved: boolean;
       shop_ids: string[];
       message: string;
+      messages?: Record<string, string>;
       channel: string;
     }) => {
       if (!sessionId) return;
@@ -523,12 +524,18 @@ export default function App() {
                     }}
                     sort={sort}
                     onAddToTrip={addToTrip}
+                    onPlanTrip={planTrip}
                     tripPicks={tripPicks}
                   />
                 ) : null}
 
                 {followups.length ? (
-                  <Inbox followups={followups} shops={shops} onPlanTrip={planTrip} />
+                  <Inbox
+                    followups={followups}
+                    shops={shops}
+                    onPlanTrip={planTrip}
+                    tripPicks={tripPicks}
+                  />
                 ) : null}
 
                 {trip ? <TripPlan trip={trip} route={tripRoute} /> : null}
@@ -622,7 +629,15 @@ export default function App() {
       <PermissionSheet
         pending={pendingApproval}
         onApprove={approve}
-        onReject={() => approve({ approved: false, shop_ids: [], message: "", channel: "simulated_sms" })}
+        onReject={() =>
+          approve({
+            approved: false,
+            shop_ids: [],
+            message: "",
+            messages: {},
+            channel: "simulated_sms",
+          })
+        }
       />
 
       <TraceDrawer open={traceOpen} onClose={() => setTraceOpen(false)} trace={trace} />

@@ -3,9 +3,10 @@ import { describe, expect, it } from "vitest";
 import { faFloor, faHours, formatPrice } from "../format";
 import type { Followup, Market, Shop, Trip } from "../types";
 import { categoryIcon } from "./category";
-import { bestConfirmedName } from "./followups";
+import { bestConfirmedName, tripPlanningReachable } from "./followups";
 import { cheaperAlert, fairnessLabel, medianLine } from "./haggle";
 import { isShopInMarket, shopsInMarket } from "./market";
+import { shopLocationLine } from "./shop";
 import { buildTripLine } from "./trip";
 import type { Haggle } from "../types";
 
@@ -47,8 +48,7 @@ const MARKET: Market = {
   radius_m: 350,
 };
 
-describe("formatPrice (P2.8)", () => {
-  it("groups prices with Persian digits and the fa-IR separator", () => {
+describe("formatPrice (P2.8)", () => {  it("groups prices with Persian digits and the fa-IR separator", () => {
     expect(formatPrice(3_150_000)).toBe("۳٬۱۵۰٬۰۰۰");
     expect(formatPrice(0)).toBe("۰");
     expect(formatPrice(null)).toBe("");
@@ -233,5 +233,29 @@ describe("trip fallback line (P1.7)", () => {
       stops: [{ order: 1, shop_id: "s1", name: "مغازه", lat: null, lon: null, verified: false }],
     };
     expect(buildTripLine(sparse)).toEqual([[35.698, 51.414]]);
+  });
+});
+
+describe("trip planning reachable (QA3 B2)", () => {
+  it("stays reachable when no shop confirms but picks were added", () => {
+    expect(tripPlanningReachable(0, 0)).toBe(false);
+    expect(tripPlanningReachable(2, 0)).toBe(true);
+    expect(tripPlanningReachable(0, 3)).toBe(true);
+    expect(tripPlanningReachable(1, 2)).toBe(true);
+  });
+});
+
+describe("shop location line (QA3 B4)", () => {
+  it("joins only the non-empty parts with « · »", () => {
+    expect(shopLocationLine("پاساژ علاالدین", "2")).toBe("پاساژ علاالدین · طبقه ۲");
+    expect(shopLocationLine(null, "2")).toBe("طبقه ۲");
+    expect(shopLocationLine("بورس جمهوری", null)).toBe("بورس جمهوری");
+    expect(shopLocationLine("", "")).toBe("");
+  });
+
+  it("never renders a dangling separator for a mall-less shop", () => {
+    const line = shopLocationLine("", "3");
+    expect(line).toBe("طبقه ۳");
+    expect(line.startsWith("·") || line.endsWith("·")).toBe(false);
   });
 });
