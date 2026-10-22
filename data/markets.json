@@ -1,0 +1,628 @@
+{
+ "generated": "2026-10-22",
+ "method": "یک آفر از بازار است اگر نشانی/نام پاساژ شامل کلیدواژهٔ بازار باشد یا مختصات فروشگاه در شعاع بازار باشد؛ قیمت‌ها به تومان",
+ "excluded": [
+  "بازار رضا — مشهد است و در تهران نیست"
+ ],
+ "markets": [
+  {
+   "market_id": "paytakht",
+   "name_fa": "مجتمع کامپیوتر پایتخت (ولیعصر، ابتدای میرداماد)",
+   "categories": [
+    "لپ تاپ و نوت بوک"
+   ],
+   "center": [
+    35.7603,
+    51.4096
+   ],
+   "radius_m": 300,
+   "keywords": [
+    "مجتمع کامپیوتر پایتخت",
+    "ابتدای میرداماد"
+   ],
+   "hours_external": {
+    "sat_thu": "09:30-21:30",
+    "fri": "closed (open Fridays of Esfand)",
+    "source": [
+     "https://cccenter.ir/تماس/",
+     "https://mahalema.com/place/paytakht_computer_complex/"
+    ]
+   },
+   "alt": "jomhouri_hafez",
+   "stats": {
+    "لپ تاپ و نوت بوک": {
+     "shops_in_market": 0,
+     "offers_in_market": 0,
+     "shops_citywide": 23,
+     "offers_citywide": 574,
+     "centroid": null,
+     "price_q1_median_q3_market": [
+      null,
+      null,
+      null
+     ],
+     "price_q1_median_q3_city": [
+      189500000,
+      313909470,
+      470000000
+     ]
+    }
+   },
+   "external_note": "ساعت و نقش بازار از وب بیرونی است (تقریبی، بررسی‌شده در ۲۰۲۶-۱۰-۲۲)؛ تعداد فروشگاه و قیمت‌ها از داده‌های ترب محاسبه شده است."
+  },
+  {
+   "market_id": "jomhouri_hafez",
+   "name_fa": "بورس جمهوری–حافظ (علاءالدین و چارسو)",
+   "categories": [
+    "گوشی موبایل",
+    "هدفون، هدست و هندزفری",
+    "لپ تاپ و نوت بوک",
+    "کیف و کاور گوشی"
+   ],
+   "center": [
+    35.695,
+    51.4115
+   ],
+   "radius_m": 350,
+   "keywords": [
+    "علاالدین",
+    "علاءالدین",
+    "چارسو"
+   ],
+   "hours_external": {
+    "alaeddin": "Sat–Thu 09:00-21:00; Fri ~11:00-16/18 (sources differ)",
+    "charsou": "daily ~10:00-22:00",
+    "source": [
+     "https://alaedingroup.ir/alaedin-commercial-complexes/",
+     "https://tehranmoble.ir/blog/aladdin-mobile-market/",
+     "https://hihotel.ir/blog/tehran-charsou-mall/"
+    ]
+   },
+   "stats": {
+    "گوشی موبایل": {
+     "shops_in_market": 90,
+     "offers_in_market": 1568,
+     "shops_citywide": 126,
+     "offers_citywide": 2010,
+     "centroid": [
+      35.69493,
+      51.41155
+     ],
+     "price_q1_median_q3_market": [
+      4500000,
+      65490000,
+      134150000
+     ],
+     "price_q1_median_q3_city": [
+      5487500,
+      71550000,
+      154625000
+     ]
+    },
+    "هدفون، هدست و هندزفری": {
+     "shops_in_market": 155,
+     "offers_in_market": 1688,
+     "shops_citywide": 242,
+     "offers_citywide": 2371,
+     "centroid": [
+      35.69475,
+      51.41135
+     ],
+     "price_q1_median_q3_market": [
+      2537750,
+      4285000,
+      9978750
+     ],
+     "price_q1_median_q3_city": [
+      2650000,
+      4398000,
+      10320000
+     ]
+    },
+    "لپ تاپ و نوت بوک": {
+     "shops_in_market": 9,
+     "offers_in_market": 285,
+     "shops_citywide": 23,
+     "offers_citywide": 574,
+     "centroid": [
+      35.69501,
+      51.41133
+     ],
+     "price_q1_median_q3_market": [
+      263408940,
+      393258940,
+      537948940
+     ],
+     "price_q1_median_q3_city": [
+      189500000,
+      313909470,
+      470000000
+     ]
+    },
+    "کیف و کاور گوشی": {
+     "shops_in_market": 17,
+     "offers_in_market": 109,
+     "shops_citywide": 27,
+     "offers_citywide": 160,
+     "centroid": [
+      35.69469,
+      51.41136
+     ],
+     "price_q1_median_q3_market": [
+      334000,
+      390000,
+      430000
+     ],
+     "price_q1_median_q3_city": [
+      340000,
+      388000,
+      450000
+     ]
+    }
+   },
+   "external_note": "ساعت و نقش بازار از وب بیرونی است (تقریبی، بررسی‌شده در ۲۰۲۶-۱۰-۲۲)؛ تعداد فروشگاه و قیمت‌ها از داده‌های ترب محاسبه شده است."
+  },
+  {
+   "market_id": "kuwaitiha_istanbul",
+   "name_fa": "پاساژ کویتی‌ها و چهارراه استانبول",
+   "categories": [
+    "کتانی و کفش اسپرت",
+    "تیشرت و پولوشرت"
+   ],
+   "center": [
+    35.6947,
+    51.4204
+   ],
+   "radius_m": 300,
+   "keywords": [
+    "کویتی",
+    "چهارراه استانبول"
+   ],
+   "hours_external": {
+    "sat_thu": "08:00-21:00",
+    "fri": "closed",
+    "source": [
+     "https://balad.ir/p/پاساژ-کویتی-ها-tehran-nei-bazar_shopping-mall-3VwTZrEMhSoLw9",
+     "https://letsgotrip.ir/kuwaiti-passage/"
+    ]
+   },
+   "stats": {
+    "کتانی و کفش اسپرت": {
+     "shops_in_market": 11,
+     "offers_in_market": 376,
+     "shops_citywide": 49,
+     "offers_citywide": 874,
+     "centroid": [
+      35.69459,
+      51.42076
+     ],
+     "price_q1_median_q3_market": [
+      4900000,
+      10620000,
+      13037500
+     ],
+     "price_q1_median_q3_city": [
+      3390000,
+      6639000,
+      11538000
+     ]
+    },
+    "تیشرت و پولوشرت": {
+     "shops_in_market": 26,
+     "offers_in_market": 386,
+     "shops_citywide": 48,
+     "offers_citywide": 541,
+     "centroid": [
+      35.69498,
+      51.42102
+     ],
+     "price_q1_median_q3_market": [
+      1590000,
+      1930000,
+      2250000
+     ],
+     "price_q1_median_q3_city": [
+      1450000,
+      1950000,
+      2440000
+     ]
+    }
+   },
+   "external_note": "ساعت و نقش بازار از وب بیرونی است (تقریبی، بررسی‌شده در ۲۰۲۶-۱۰-۲۲)؛ تعداد فروشگاه و قیمت‌ها از داده‌های ترب محاسبه شده است."
+  },
+  {
+   "market_id": "lalehzar",
+   "name_fa": "خیابان لاله‌زار (بورس لوستر و روشنایی/الکتریکی)",
+   "categories": [
+    "لوستر و چراغ تزئینی",
+    "لامپ LED و کم مصرف",
+    "چراغ پنلی و سقفی"
+   ],
+   "center": [
+    35.6923,
+    51.4229
+   ],
+   "radius_m": 400,
+   "keywords": [
+    "لاله زار",
+    "لاله‌زار",
+    "لالهزار"
+   ],
+   "hours_external": {
+    "typical": "~10/11:00-20:00, Fridays shorter (shop-dependent)",
+    "source": [
+     "https://sheralight.ir/لوستر-فروشی-های-تهران/",
+     "https://khoobo.com/buy-chandeliers-and-lighting/"
+    ]
+   },
+   "stats": {
+    "لوستر و چراغ تزئینی": {
+     "shops_in_market": 109,
+     "offers_in_market": 1056,
+     "shops_citywide": 123,
+     "offers_citywide": 1202,
+     "centroid": [
+      35.69415,
+      51.42324
+     ],
+     "price_q1_median_q3_market": [
+      1950000,
+      3859500,
+      7376750
+     ],
+     "price_q1_median_q3_city": [
+      1800000,
+      3500000,
+      6838209
+     ]
+    },
+    "لامپ LED و کم مصرف": {
+     "shops_in_market": 143,
+     "offers_in_market": 1021,
+     "shops_citywide": 178,
+     "offers_citywide": 1185,
+     "centroid": [
+      35.6925,
+      51.42297
+     ],
+     "price_q1_median_q3_market": [
+      211050,
+      410000,
+      900000
+     ],
+     "price_q1_median_q3_city": [
+      210000,
+      410000,
+      894500
+     ]
+    },
+    "چراغ پنلی و سقفی": {
+     "shops_in_market": 184,
+     "offers_in_market": 2667,
+     "shops_citywide": 208,
+     "offers_citywide": 2987,
+     "centroid": [
+      35.69305,
+      51.42307
+     ],
+     "price_q1_median_q3_market": [
+      560000,
+      1339500,
+      3275000
+     ],
+     "price_q1_median_q3_city": [
+      549000,
+      1300000,
+      3150000
+     ]
+    }
+   },
+   "external_note": "ساعت و نقش بازار از وب بیرونی است (تقریبی، بررسی‌شده در ۲۰۲۶-۱۰-۲۲)؛ تعداد فروشگاه و قیمت‌ها از داده‌های ترب محاسبه شده است."
+  }
+ ],
+ "external_markets": [
+  {
+   "market_id": "gb_carpet",
+   "name_fa": "بازار فرش دستباف (خیابان خیام، ساختمان بازار فرش ایران، فراشباشی)",
+   "keywords_fa": [
+    "فرش دستباف",
+    "گلیم",
+    "گبه"
+   ],
+   "center": [
+    35.6735,
+    51.417
+   ],
+   "hours_external": {
+    "sat_wed": "08:30-17:00 (street-front passages ~20:00)",
+    "thu": "inner ~14:00",
+    "fri": "closed",
+    "source": [
+     "https://tehranica.info/shopping-center/ساختمان-بازار-فرش-ایران-بازار/",
+     "https://tehranica.info/lists/بورس-های-بازار-تهران/",
+     "https://www.digikala.com/mag/tehran-grand-bazaar/"
+    ]
+   },
+   "related_dataset_categories": [
+    "فرش دستبافت",
+    "فرش ماشینی"
+   ]
+  },
+  {
+   "market_id": "gb_fabric",
+   "name_fa": "بازار پارچه (بازار امیر/بزازها، حمام‌چال، عباس‌آباد)",
+   "keywords_fa": [
+    "پارچه",
+    "منسوجات"
+   ],
+   "center": [
+    35.6745,
+    51.4205
+   ],
+   "hours_external": {
+    "sat_wed": "08:30-17:00 (street-front passages ~20:00)",
+    "thu": "inner ~14:00",
+    "fri": "closed",
+    "source": [
+     "https://tehranica.info/lists/بورس-های-بازار-تهران/",
+     "https://www.digikala.com/mag/tehran-grand-bazaar/"
+    ]
+   },
+   "related_dataset_categories": [
+    "انواع پارچه"
+   ]
+  },
+  {
+   "market_id": "gb_gold",
+   "name_fa": "بازار زرگرها (سبزه‌میدان، ۱۵ خرداد)",
+   "keywords_fa": [
+    "طلا",
+    "جواهر",
+    "سکه طلا"
+   ],
+   "center": [
+    35.6765,
+    51.42
+   ],
+   "hours_external": {
+    "sat_wed": "08:30-17:00 (street-front passages ~20:00)",
+    "thu": "inner ~14:00",
+    "fri": "closed",
+    "source": [
+     "https://tehranica.info/lists/بورس-های-بازار-تهران/"
+    ]
+   },
+   "related_dataset_categories": [
+    "شمش طلا"
+   ]
+  },
+  {
+   "market_id": "gb_spice",
+   "name_fa": "بورس عطاری و ادویه (بازار سید اسماعیل، پله‌نوروزخان، کوچه احمدی/مولوی)",
+   "keywords_fa": [
+    "ادویه",
+    "گیاهان دارویی",
+    "عطاری",
+    "خشکبار عمده"
+   ],
+   "center": [
+    35.6725,
+    51.4235
+   ],
+   "hours_external": {
+    "sat_wed": "08:30-17:00 (street-front passages ~20:00)",
+    "thu": "inner ~14:00",
+    "fri": "closed",
+    "source": [
+     "https://tehranica.info/lists/بورس-های-بازار-تهران/"
+    ]
+   },
+   "related_dataset_categories": []
+  },
+  {
+   "market_id": "gb_stationery",
+   "name_fa": "بازار بین‌الحرمین/مسجد جامع (لوازم‌التحریر)",
+   "keywords_fa": [
+    "لوازم تحریر",
+    "نوشت‌افزار",
+    "لوازم نقاشی"
+   ],
+   "center": [
+    35.674,
+    51.4245
+   ],
+   "hours_external": {
+    "sat_wed": "08:30-17:00 (street-front passages ~20:00)",
+    "thu": "inner ~14:00",
+    "fri": "closed",
+    "source": [
+     "https://tehranica.info/lists/بورس-های-بازار-تهران/",
+     "https://www.digikala.com/mag/tehran-grand-bazaar/"
+    ]
+   },
+   "related_dataset_categories": []
+  },
+  {
+   "market_id": "gb_womens",
+   "name_fa": "بازار جعفری و سرای ملی (شال، روسری، پوشاک زنانه)",
+   "keywords_fa": [
+    "شال و روسری",
+    "پوشاک زنانه"
+   ],
+   "center": [
+    35.6755,
+    51.4225
+   ],
+   "hours_external": {
+    "sat_wed": "08:30-17:00 (street-front passages ~20:00)",
+    "thu": "inner ~14:00",
+    "fri": "closed",
+    "source": [
+     "https://www.digikala.com/mag/tehran-grand-bazaar/"
+    ]
+   },
+   "related_dataset_categories": []
+  },
+  {
+   "market_id": "manouchehri",
+   "name_fa": "خیابان منوچهری و پاساژ چهلستون (عتیقه، آرایشی، کیف و چمدان)",
+   "keywords_fa": [
+    "عتیقه",
+    "سکه قدیمی",
+    "کلکسیون",
+    "لوازم آرایشی عمده",
+    "چمدان"
+   ],
+   "center": [
+    35.6935,
+    51.4245
+   ],
+   "hours_external": {
+    "typical": "~10:00-22:00",
+    "source": [
+     "https://tehranica.info/attractions/localities/road/خیابان-منوچهری-تهران/"
+    ]
+   },
+   "related_dataset_categories": [
+    "عطر و ادکلن"
+   ]
+  },
+  {
+   "market_id": "baharestan_music",
+   "name_fa": "راستهٔ ساز میدان بهارستان (و جمهوری تا چهارراه استانبول)",
+   "keywords_fa": [
+    "ساز",
+    "آلات موسیقی",
+    "تار",
+    "سه‌تار",
+    "ویولن"
+   ],
+   "center": [
+    35.6925,
+    51.431
+   ],
+   "hours_external": {
+    "typical": "daily 08:00-20:00",
+    "price_hint_external": "ساز از ~۵۰۰ هزار تا بیش از ۷۰ میلیون تومان (همشهری)",
+    "source": [
+     "https://www.hamshahrionline.ir/news/834068/"
+    ]
+   },
+   "related_dataset_categories": [
+    "گیتار"
+   ]
+  },
+  {
+   "market_id": "hasanabad_tools",
+   "name_fa": "بورس ابزار و یراق (امام خمینی، چهارراه حسن‌آباد تا ولیعصر، شیخ هادی)",
+   "keywords_fa": [
+    "ابزار",
+    "یراق",
+    "دریل",
+    "ابزار دستی"
+   ],
+   "center": [
+    35.687,
+    51.408
+   ],
+   "hours_external": {
+    "typical": "shop-dependent (unverified)",
+    "source": [
+     "https://balad.ir/blog/places-to-shop-in-tehran/"
+    ]
+   },
+   "related_dataset_categories": [
+    "دریل و پیچ گوشتی برقی و شارژی",
+    "سایر ابزار دستی و تجهیزات کارگاهی"
+   ]
+  },
+  {
+   "market_id": "aminhozour",
+   "name_fa": "سه‌راه امین حضور / خیابان امیرکبیر (لوازم خانگی برقی)",
+   "keywords_fa": [
+    "لوازم خانگی",
+    "یخچال",
+    "لباسشویی"
+   ],
+   "center": [
+    35.689,
+    51.4275
+   ],
+   "hours_external": {
+    "typical": "shop-dependent (unverified)",
+    "source": [
+     "https://balad.ir/blog/places-to-shop-in-tehran/"
+    ]
+   },
+   "related_dataset_categories": [
+    "یخچال فریزر ساید بای ساید",
+    "یخچال فریزر بالاپایین"
+   ]
+  },
+  {
+   "market_id": "haft_tir_carpet",
+   "name_fa": "میدان هفت‌تیر (فرش ماشینی و گلیم)",
+   "keywords_fa": [
+    "فرش ماشینی",
+    "موکت"
+   ],
+   "center": [
+    35.715,
+    51.426
+   ],
+   "hours_external": {
+    "typical": "shop-dependent (unverified)",
+    "source": [
+     "https://balad.ir/blog/places-to-shop-in-tehran/"
+    ]
+   },
+   "related_dataset_categories": [
+    "فرش ماشینی"
+   ]
+  },
+  {
+   "market_id": "parvaneh_friday",
+   "name_fa": "جمعه‌بازار پروانه (باغ هنر، اتوبان حقانی)",
+   "keywords_fa": [
+    "دست دوم",
+    "عتیقه",
+    "صنایع دستی",
+    "کلکسیون"
+   ],
+   "center": [
+    35.756,
+    51.433
+   ],
+   "hours_external": {
+    "fri": "08:00-16/17:00 only Fridays",
+    "note": "used clothing reportedly banned at new site",
+    "source": [
+     "https://bazarparvane.com/",
+     "https://pinorest.com/mag/parvaneh-friday-bazar/"
+    ]
+   },
+   "related_dataset_categories": []
+  },
+  {
+   "market_id": "jomhouri_wedding",
+   "name_fa": "خیابان جمهوری/کوچه مهران (لباس عروس اقتصادی)",
+   "keywords_fa": [
+    "لباس عروس",
+    "کت و شلوار داماد"
+   ],
+   "center": [
+    35.6955,
+    51.405
+   ],
+   "hours_external": {
+    "typical": "shop-dependent (unverified)",
+    "source": [
+     "https://balad.ir/blog/places-to-shop-in-tehran/"
+    ]
+   },
+   "related_dataset_categories": [
+    "لباس عروس"
+   ]
+  }
+ ]
+}

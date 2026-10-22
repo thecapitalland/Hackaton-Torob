@@ -1,0 +1,5 @@
+{"_note":"MOCK points of interest (not in Torob dataset). Labeled 'پیشنهاد نمونه' in UI. Coordinates approx. near Hafez/Jomhouri (Alaeddin mall area).",
+ "cafes":[
+  {"id":"cafe_1","name":"کافه نمونهٔ حافظ","lat":35.6952,"lon":51.4125,"open":"09:00-22:00"},
+  {"id":"cafe_2","name":"کافه نمونهٔ جمهوری","lat":35.6921,"lon":51.4098,"open":"10:00-23:00"},
+  {"id":"cafe_3","name":"کافه نمونهٔ فردوسی","lat":35.6978,"lon":51.4170,"open":"08:30-21:00"}]}

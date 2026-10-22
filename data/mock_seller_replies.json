@@ -1,0 +1,11 @@
+{"_note":"SIMULATED seller replies - shown with label 'پاسخ شبیه‌سازی‌شده'. Never sent to dataset phone numbers.",
+ "templates":{
+  "available":"سلام، بله موجوده. قیمت امروز {price} تومنه. تا ۸ و نیم شب هستیم، طبقه منفی یک.",
+  "price_changed":"سلام موجوده ولی قیمت جدید {price_up} هست، دیروز آپدیت شد.",
+  "unavailable":"سلام، این مدل فعلاً تموم شده. مدل مشابه داریم اگه بخواید.",
+  "unclear":"یه لحظه چک کنم خبرتون میکنم",
+  "no_response":null},
+ "demo_script_assignment":{
+  "shop_13336f1a0d2ec0b16bbd60aa":"available",
+  "shop_60e835a590a4a652ce0ad6d9":"price_changed",
+  "_default":"unavailable"}}
