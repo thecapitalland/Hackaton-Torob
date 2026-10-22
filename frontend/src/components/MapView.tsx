@@ -1,0 +1,199 @@
+import { useEffect, useMemo, useState } from "react";
+import {
+  MapContainer,
+  Marker,
+  Polyline,
+  Popup,
+  TileLayer,
+  Circle,
+  useMap,
+} from "react-leaflet";
+import L from "leaflet";
+import type { Market, Shop, SlotLocation } from "../types";
+import { faDigits, formatDistance } from "../format";
+
+const OSM_URL = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
+const OSM_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
+const FALLBACK_URL = "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png";
+const FALLBACK_ATTRIBUTION = '&copy; <a href="https://carto.com/attributions">CARTO</a> | OSM';
+
+function divIcon(className: string, html: string) {
+  return L.divIcon({
+    className: "",
+    html: `<div class="${className}">${html}</div>`,
+    iconSize: [32, 32],
+    iconAnchor: [16, 16],
+  });
+}
+
+function Recenter({ center }: { center: [number, number] }) {
+  const map = useMap();
+  useEffect(() => {
+    map.setView(center, 14);
+  }, [center, map]);
+  return null;
+}
+
+export function MapView({
+  shops,
+  market,
+  userLocation,
+  center,
+  onSelectShop,
+  route,
+  className = "h-[320px]",
+}: {
+  shops: Shop[];
+  market?: Market | null;
+  userLocation?: SlotLocation | null;
+  center?: [number, number] | null;
+  onSelectShop?: (shop: Shop) => void;
+  /** walking route polyline [[lat, lon], ...] - drawn when present */
+  route?: [number, number][] | null;
+  className?: string;
+}) {
+  const [tileUrl, setTileUrl] = useState(OSM_URL);
+  const [attribution, setAttribution] = useState(OSM_ATTRIBUTION);
+  const [expandedMall, setExpandedMall] = useState<string | null>(null);
+
+  const points = useMemo(
+    () => shops.filter((shop) => shop.lat !== null && shop.lon !== null),
+    [shops],
+  );
+
+  const malls = useMemo(() => {
+    const groups = new Map<string, Shop[]>();
+    points.forEach((shop) => {
+      const key = shop.mall ?? "";
+      if (!key) return;
+      groups.set(key, [...(groups.get(key) ?? []), shop]);
+    });
+    return [...groups.entries()].filter(([, items]) => items.length >= 3);
+  }, [points]);
+
+  const mallNames = new Set(malls.map(([name]) => name));
+
+  const visible = points.filter(
+    (shop) => !shop.mall || !mallNames.has(shop.mall) || expandedMall === shop.mall,
+  );
+
+  const mapCenter: [number, number] =
+    center ??
+    (points.length
+      ? [
+          points.reduce((sum, shop) => sum + (shop.lat ?? 0), 0) / points.length,
+          points.reduce((sum, shop) => sum + (shop.lon ?? 0), 0) / points.length,
+        ]
+      : [35.695, 51.4115]);
+
+  const marketPoint =
+    (market?.centroid as [number, number] | null | undefined) ??
+    (market?.center as [number, number] | undefined) ??
+    null;
+
+  return (
+    <MapContainer
+      center={mapCenter}
+      zoom={14}
+      scrollWheelZoom
+      className={`${className} w-full rounded-card border border-brand-border`}
+      style={{ zIndex: 0 }}
+    >
+      <Recenter center={mapCenter} />
+      <TileLayer
+        url={tileUrl}
+        attribution={attribution}
+        eventHandlers={{
+          tileerror: () => {
+            if (tileUrl !== FALLBACK_URL) {
+              setTileUrl(FALLBACK_URL);
+              setAttribution(FALLBACK_ATTRIBUTION);
+            }
+          },
+        }}
+      />
+
+      {marketPoint ? (
+        <>
+          {market?.radius_m ? (
+            <Circle
+              center={marketPoint}
+              radius={market.radius_m}
+              pathOptions={{ color: "#8E4EC6", fillColor: "#8E4EC6", fillOpacity: 0.08 }}
+            />
+          ) : null}
+          <Marker
+            position={marketPoint}
+            icon={divIcon("market-marker", "<span>🏬</span>")}
+          >
+            <Popup>{market?.name_fa}</Popup>
+          </Marker>
+        </>
+      ) : null}
+
+      {malls.map(([name, items]) => {
+        if (expandedMall === name) return null;
+        const lat = items.reduce((sum, shop) => sum + (shop.lat ?? 0), 0) / items.length;
+        const lon = items.reduce((sum, shop) => sum + (shop.lon ?? 0), 0) / items.length;
+        return (
+          <Marker
+            key={`cluster-${name}`}
+            position={[lat, lon]}
+            icon={divIcon(
+              "market-marker",
+              `<span style="font-size:11px;font-weight:700">${faDigits(items.length)}</span>`,
+            )}
+            eventHandlers={{ click: () => setExpandedMall(name) }}
+          >
+            <Popup>{`${faDigits(items.length)} فروشگاه در ${name}`}</Popup>
+          </Marker>
+        );
+      })}
+
+      {visible.map((shop) => (
+        <Marker
+          key={shop.shop_id}
+          position={[shop.lat as number, shop.lon as number]}
+          icon={divIcon(
+            `shop-marker shop-marker--${shop.open_status}`,
+            shop.open_status === "open" ? "✓" : shop.open_status === "closed" ? "✕" : "؟",
+          )}
+          eventHandlers={{
+            click: () => onSelectShop?.(shop),
+          }}
+        >
+          <Popup>
+            <div className="text-right">
+              <strong>{shop.name}</strong>
+              <br />
+              {faDigits(shop.price)} تومان
+              <br />
+              {shop.open_text}
+            </div>
+          </Popup>
+        </Marker>
+      ))}
+
+      {route && route.length >= 2 ? (
+        <Polyline
+          positions={route}
+          pathOptions={{ color: "#E63946", weight: 3, opacity: 0.9 }}
+          interactive={false}
+        />
+      ) : null}
+
+      {userLocation ? (
+        <Marker
+          position={[userLocation.lat, userLocation.lon]}
+          icon={divIcon("user-marker", "")}
+        >
+          <Popup>موقعیت شما</Popup>
+        </Marker>
+      ) : null}
+    </MapContainer>
+  );
+}
+
+export function distanceLabel(shop: Shop): string {
+  return formatDistance(shop.distance_m);
+}

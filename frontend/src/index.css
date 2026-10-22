@@ -1,0 +1,108 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-brand-bg text-brand-text font-sans text-[15px] leading-6 antialiased;
+  -webkit-tap-highlight-color: transparent;
+  overflow-x: hidden;
+}
+
+button {
+  @apply transition-all duration-150;
+}
+
+/* ---- scrollbars ---- */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* ---- leaflet tweaks ---- */
+.leaflet-container {
+  font-family: Vazirmatn, system-ui, sans-serif;
+  background: #efeee9;
+}
+.leaflet-control-attribution {
+  font-size: 9px;
+  direction: ltr;
+}
+.leaflet-popup-content-wrapper {
+  border-radius: 14px;
+  font-family: Vazirmatn, system-ui, sans-serif;
+}
+.leaflet-popup-content {
+  margin: 10px 12px;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.shop-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 13px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+  border: 2px solid #fff;
+}
+.shop-marker--open {
+  background: #30a46c;
+}
+.shop-marker--unknown {
+  background: #8e8c85;
+}
+.shop-marker--closed {
+  background: #e5484d;
+}
+.market-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: #8e4ec6;
+  color: #fff;
+  font-size: 16px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  border: 2px solid #fff;
+}
+.user-marker {
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: #1c7ef2;
+  border: 3px solid #fff;
+  box-shadow: 0 0 0 6px rgba(28, 126, 242, 0.18);
+}
+
+.fade-up {
+  animation: fadeUp 0.28s ease-out both;
+}
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
