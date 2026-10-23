@@ -334,6 +334,19 @@ def understand(state: AgentState) -> dict:
         }
     slots = _merge_slots(current, extracted)
 
+    # A newly typed budget replaces the previous budget constraint. In
+    # particular, «بالای ۱۰ میلیون هم بگرد» must not keep an older maximum
+    # that would make the range impossible.
+    turn_budget_max, turn_budget_min = rules.parse_budget(text)
+    if turn_budget_max is not None:
+        slots["budget_max"] = turn_budget_max
+        slots["budget_min"] = None
+        slots["budget_skipped"] = False
+    elif turn_budget_min is not None:
+        slots["budget_min"] = turn_budget_min
+        slots["budget_max"] = None
+        slots["budget_skipped"] = False
+
     # Update #1: a GPS position from the client fills an empty location slot,
     # but an explicit text location above always wins.
     user_location = state.get("user_location") or {}

@@ -102,3 +102,25 @@ def test_other_bare_slot_answer_is_acknowledged_and_open_question_repeats():
         assert result["slots"]["installment"] is False
         assert result["pending"]["id"] == "q_location"
         assert any("پرداخت ثبت شد" in message["content"] for message in result["messages"])
+
+
+def test_natural_language_budget_and_location_edits_keep_the_session():
+    with TestClient(app) as client:
+        session_id = _new_session(client)
+        initial = _chat(client, session_id, "گوشی سامسونگ تا ۳ میلیون")
+        assert initial["pending"]["id"] == "q_location"
+        first_results = client.post(
+            "/api/resume", json={"session_id": session_id, "value": "جمهوری"}
+        ).json()
+        original_query = first_results["slots"]["query"]
+
+        higher_budget = _chat(client, session_id, "بالای ۱۰ میلیون هم بگرد")
+        assert higher_budget["slots"]["query"] == original_query
+        assert higher_budget["slots"]["budget_min"] == 10_000_000
+        assert higher_budget["slots"]["budget_max"] is None
+        assert higher_budget["cards"]
+
+        new_location = _chat(client, session_id, "تو جمهوری هم بگرد")
+        assert new_location["slots"]["query"] == original_query
+        assert new_location["slots"]["location"]["label"] == "جمهوری"
+        assert new_location["cards"]
