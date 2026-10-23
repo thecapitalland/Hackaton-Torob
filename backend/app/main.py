@@ -33,6 +33,7 @@ from .data_static import (  # noqa: E402
 )
 from .graph import build_graph  # noqa: E402
 from . import rules  # noqa: E402
+from . import normalize as normalize_utils  # noqa: E402
 from .llm import get_client  # noqa: E402
 from .services import neshan as neshan_service  # noqa: E402
 from .tools import cafes as cafes_tool  # noqa: E402
@@ -124,6 +125,13 @@ class TripIn(BaseModel):
 
 
 class GeoOrigin(BaseModel):
+    lat: float
+    lon: float
+
+
+class LocationIn(BaseModel):
+    session_id: str
+    label: str = "موقعیت فعلی شما"
     lat: float
     lon: float
 
@@ -290,6 +298,58 @@ async def geo_reverse(lat: float, lon: float) -> dict:
     if address:
         return address
     return _nearest_neighbourhood(lat, lon)
+
+
+@app.get("/api/geo/search")
+async def geo_search(q: str = "") -> dict:
+    """Search Neshan when configured, then merge deterministic local hoods."""
+    query = q.strip()
+    if len(query) < 2:
+        return {"results": []}
+    candidates = list(neshan_service.search(query) or [])
+    candidates.extend(normalize_utils.search_neighbourhoods(query, limit=8))
+    results: list[dict] = []
+    seen: set[str] = set()
+    for item in candidates:
+        label = str(item.get("name_fa") or item.get("label") or "").strip()
+        if not label or item.get("lat") is None or item.get("lon") is None:
+            continue
+        key = normalize_utils.normalize(label)
+        if key in seen:
+            continue
+        seen.add(key)
+        results.append({
+            "name_fa": label,
+            "lat": float(item["lat"]),
+            "lon": float(item["lon"]),
+            "source": item.get("source") or "fallback",
+        })
+        if len(results) == 8:
+            break
+    return {"results": results}
+
+
+@app.post("/api/location")
+async def update_location(body: LocationIn) -> dict:
+    """Change the origin in the current session and re-rank its selected model."""
+    before = _state_snapshot(body.session_id)
+    values_before = before.get("values") or {}
+    product_id = values_before.get("selected_product_id") or (values_before.get("product") or {}).get("product_id")
+    result = await _invoke(
+        body.session_id,
+        {
+            "action": "set_location",
+            "location_update": {"label": body.label, "lat": body.lat, "lon": body.lon},
+            "product_id": product_id,
+        },
+    )
+    values = (result or {}).get("values") or _state_snapshot(body.session_id)["values"]
+    payload = _base_payload(body.session_id, values, before, None)
+    payload["product"] = values.get("product")
+    payload["shops"] = values.get("shops") or []
+    payload["map_center"] = _map_center(payload["shops"])
+    payload["specialty_market"] = values.get("specialty_market")
+    return payload
 
 
 @app.post("/api/geo/routes")

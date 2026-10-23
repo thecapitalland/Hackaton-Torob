@@ -124,6 +124,37 @@ def reverse_geocode(lat: float, lon: float) -> dict | None:
     }
 
 
+def search(term: str) -> list[dict] | None:
+    """Search Neshan places and return normalized coordinate results.
+
+    The client deliberately exposes only the small subset needed by the UI;
+    the API key stays server-side and unavailable results fall back locally.
+    """
+    term = (term or "").strip()
+    if len(term) < 2:
+        return None
+    data = _request("/v1/search", {"term": term, "lat": 35.7, "lng": 51.4})
+    items = (data or {}).get("items") or []
+    results: list[dict] = []
+    for item in items:
+        location = item.get("location") or {}
+        if isinstance(location, dict):
+            lat, lon = location.get("y"), location.get("x")
+        elif isinstance(location, (list, tuple)) and len(location) >= 2:
+            lon, lat = location[0], location[1]
+        else:
+            continue
+        if lat is None or lon is None:
+            continue
+        results.append({
+            "name_fa": str(item.get("title") or item.get("address") or term),
+            "lat": float(lat),
+            "lon": float(lon),
+            "source": "neshan",
+        })
+    return results or None
+
+
 def decode_polyline(encoded: str) -> list[list[float]]:
     """Decode Google-style encoded polyline to ``[[lat, lon], ...]``."""
     points: list[list[float]] = []

@@ -1226,6 +1226,21 @@ def find_stores(state: AgentState) -> dict:
     }
 
 
+def set_location(state: AgentState) -> dict:
+    """Update the session's shopping origin without resetting its query."""
+    location = state.get("location_update") or state.get("user_location") or {}
+    if location.get("lat") is None or location.get("lon") is None:
+        return {}
+    slots = dict(state.get("slots") or {})
+    slots["location"] = {
+        "label": str(location.get("label") or "موقعیت فعلی شما"),
+        "lat": float(location["lat"]),
+        "lon": float(location["lon"]),
+    }
+    slots["location_skipped"] = False
+    return {"slots": slots, "location_update": location}
+
+
 # --------------------------------------------------------------------------
 # verify: plan_contact -> approve_contact -> send -> collect -> parse -> rerank
 # --------------------------------------------------------------------------
@@ -1678,9 +1693,13 @@ def build_trip(state: AgentState) -> dict:
 
 def route_action(state: AgentState) -> str:
     action = state.get("action") or "chat"
-    if action in {"select_product", "verify", "trip", "chat"}:
+    if action in {"select_product", "verify", "trip", "chat", "set_location"}:
         return action
     return "chat"
+
+
+def route_after_location(state: AgentState) -> str:
+    return "find_stores" if (state.get("product_id") or state.get("selected_product_id")) else "end"
 
 
 def route_understand(state: AgentState) -> str:
@@ -1710,6 +1729,7 @@ def build_graph(checkpointer=None) -> Any:
     graph.add_node("out_of_catalog", out_of_catalog)
     graph.add_node("compare", compare)
     graph.add_node("find_stores", find_stores)
+    graph.add_node("set_location", set_location)
     graph.add_node("plan_contact", plan_contact)
     graph.add_node("approve_contact", approve_contact)
     graph.add_node("send_messages", send_messages)
@@ -1727,6 +1747,7 @@ def build_graph(checkpointer=None) -> Any:
             "select_product": "find_stores",
             "verify": "plan_contact",
             "trip": "build_trip",
+            "set_location": "set_location",
         },
     )
 
@@ -1745,6 +1766,7 @@ def build_graph(checkpointer=None) -> Any:
     graph.add_edge("out_of_catalog", END)
     graph.add_edge("compare", END)
     graph.add_edge("find_stores", END)
+    graph.add_conditional_edges("set_location", route_after_location, {"find_stores": "find_stores", "end": END})
 
     graph.add_edge("plan_contact", "approve_contact")
     graph.add_conditional_edges(

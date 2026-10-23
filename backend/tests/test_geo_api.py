@@ -23,6 +23,7 @@ def test_neshan_without_key_returns_none(monkeypatch):
     assert neshan.reverse_geocode(35.7, 51.4) is None
     assert neshan.direction(35.7, 51.4, 35.69, 51.41) is None
     assert neshan.nearby_cafes(35.7, 51.4) is None
+    assert neshan.search("سعادت‌آباد") is None
     # and it must not have attempted any request (no cache entries)
     assert not neshan._cache
 
@@ -51,6 +52,24 @@ def test_neshan_disabled_after_invalid_key(monkeypatch):
     finally:
         neshan._client.get = original
         neshan._invalid_key_until = 0.0
+
+
+def test_neshan_search_normalizes_results(monkeypatch):
+    from app.services import neshan
+
+    monkeypatch.setattr(
+        neshan,
+        "_request",
+        lambda path, params: {
+            "items": [
+                {"title": "محلهٔ نمونه", "location": {"y": 35.7, "x": 51.4}},
+                {"title": "بدون مختصات", "location": {}},
+            ]
+        },
+    )
+    assert neshan.search("نمونه") == [
+        {"name_fa": "محلهٔ نمونه", "lat": 35.7, "lon": 51.4, "source": "neshan"}
+    ]
 
 
 def test_decode_polyline():
@@ -97,6 +116,60 @@ def test_geo_reverse_fallback_nearest_neighbourhood(api_client):
     assert body["source"] == "fallback"
     assert body["neighbourhood"] in {"فردوسی", "میدان فردوسی"}
     assert "تخمینی" in body["formatted_address"]
+
+
+def test_neighbourhood_fallback_aliases_and_bbox():
+    from app.normalize import TEHRAN_BBOX, TEHRAN_NEIGHBOURHOODS, geocode_neighbourhood
+
+    spaced = geocode_neighbourhood("سعادت آباد")
+    joined = geocode_neighbourhood("سعادت‌آباد")
+    assert spaced and joined
+    assert spaced["label"] == joined["label"] == "سعادت‌آباد"
+    assert (spaced["lat"], spaced["lon"]) == (joined["lat"], joined["lon"])
+    assert geocode_neighbourhood("محله ناشناخته") is None
+    assert len(TEHRAN_NEIGHBOURHOODS) >= 60
+    assert all(
+        TEHRAN_BBOX["lat_min"] <= item["lat"] <= TEHRAN_BBOX["lat_max"]
+        and TEHRAN_BBOX["lon_min"] <= item["lon"] <= TEHRAN_BBOX["lon_max"]
+        for item in TEHRAN_NEIGHBOURHOODS
+    )
+
+
+def test_geo_search_local_fallback_without_neshan_key(api_client):
+    response = api_client.get("/api/geo/search", params={"q": "سعادت آباد"})
+    assert response.status_code == 200
+    results = response.json()["results"]
+    assert results
+    result = next(item for item in results if item["name_fa"] == "سعادت‌آباد")
+    assert result["source"] == "fallback"
+    assert 35.55 <= result["lat"] <= 35.85
+    assert 51.10 <= result["lon"] <= 51.65
+
+
+def test_location_update_reuses_session_and_reloads_selected_product(api_client):
+    session_id = api_client.post("/api/session").json()["session_id"]
+    initial = api_client.post(
+        "/api/chat", json={"session_id": session_id, "text": "هدفون تا ۳ میلیون"}
+    ).json()
+    assert initial["pending"]["id"] == "q_location"
+    located = api_client.post(
+        "/api/resume", json={"session_id": session_id, "value": "جمهوری"}
+    ).json()
+    product_id = located["cards"][0]["product_id"]
+    selected = api_client.post(
+        "/api/select_product",
+        json={"session_id": session_id, "product_id": product_id},
+    ).json()
+    moved = api_client.post(
+        "/api/location",
+        json={"session_id": session_id, "label": "تجریش", "lat": 35.804, "lon": 51.433},
+    )
+    assert moved.status_code == 200
+    body = moved.json()
+    assert body["slots"]["location"]["label"] == "تجریش"
+    assert body["product"]["product_id"] == product_id
+    assert body["shops"]
+    assert body["session_id"] == selected["session_id"]
 
 
 def test_geo_routes_estimate_fallback(api_client):

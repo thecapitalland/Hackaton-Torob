@@ -6,7 +6,7 @@ import operator
 from typing import Annotated, Literal, Optional, TypedDict
 
 Phase = Literal["discover", "recommend", "stores", "verify", "trip", "done", "out_of_catalog", "compare"]
-Action = Literal["chat", "select_product", "verify", "trip"]
+Action = Literal["chat", "select_product", "verify", "trip", "set_location"]
 
 
 class Slots(TypedDict, total=False):
@@ -94,6 +94,7 @@ class AgentState(TypedDict, total=False):
     # GPS position passed straight from the client (Update #1); consumed by
     # ``understand`` and never stored as a message.
     user_location: Optional[dict]
+    location_update: Optional[dict]
     candidates: list[dict]
     top_search_score: float
     cards: list[Card]

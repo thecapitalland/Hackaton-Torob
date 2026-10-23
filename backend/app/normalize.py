@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import re
 import unicodedata
+import json
+from pathlib import Path
 
 AR_DIGITS = "٠١٢٣٤٥٦٧٨٩"
 FA_DIGITS = "۰۱۲۳۴۵۶۷۸۹"
@@ -199,26 +201,91 @@ ACCESSORY_CATEGORIES: set[str] = {
     "محافظ صفحه",
 }
 
-# Neighbourhood coordinates used when the user picks a chip or when the LLM
-# extracts a location label. (lat, lon)
-NEIGHBORHOODS: dict[str, tuple[float, float]] = {
-    "فردوسی": (35.7010, 51.4187),
-    "میدان فردوسی": (35.7010, 51.4187),
-    "جمهوری": (35.6925, 51.4105),
-    "خیابان جمهوری": (35.6925, 51.4105),
-    "ولیعصر": (35.7000, 51.4060),
-    "تیرجار": (35.7000, 51.4060),
-    "تجریش": (35.8040, 51.4330),
-    "انقلاب": (35.7010, 51.3910),
-    "لاله زار": (35.6923, 51.4229),
-    "لاله‌زار": (35.6923, 51.4229),
-    "بهارستان": (35.6925, 51.4310),
-    "میدان بهارستان": (35.6925, 51.4310),
-    "علاالدین": (35.6947, 51.4112),
-    "علاءالدین": (35.6947, 51.4112),
-    "حافظ": (35.6950, 51.4115),
-    "بازار رضا": (36.3180, 59.6067),  # Mashhad - never used, kept out of Tehran flow
-}
-
 # Tehran bounding box used for the `in_bbox` flag.
 TEHRAN_BBOX = {"lat_min": 35.55, "lat_max": 35.85, "lon_min": 51.10, "lon_max": 51.65}
+
+
+def _load_tehran_neighbourhoods() -> list[dict]:
+    path = Path(__file__).with_name("data") / "tehran_neighbourhoods.json"
+    with path.open(encoding="utf-8") as handle:
+        entries = json.load(handle)
+    result = []
+    for entry in entries:
+        lat, lon = float(entry["lat"]), float(entry["lon"])
+        if (
+            TEHRAN_BBOX["lat_min"] <= lat <= TEHRAN_BBOX["lat_max"]
+            and TEHRAN_BBOX["lon_min"] <= lon <= TEHRAN_BBOX["lon_max"]
+        ):
+            result.append({
+                "name_fa": str(entry["name_fa"]),
+                "aliases": [str(alias) for alias in entry.get("aliases", [])],
+                "lat": lat,
+                "lon": lon,
+            })
+    return result
+
+
+TEHRAN_NEIGHBOURHOODS = _load_tehran_neighbourhoods()
+
+# All recognized labels (including aliases) map to the same approximate
+# centroid. The separate JSON records retain the canonical display label.
+NEIGHBORHOODS: dict[str, tuple[float, float]] = {}
+for _entry in TEHRAN_NEIGHBOURHOODS:
+    _coords = (_entry["lat"], _entry["lon"])
+    for _label in (_entry["name_fa"], *_entry["aliases"]):
+        NEIGHBORHOODS.setdefault(_label, _coords)
+
+
+def geocode_neighbourhood(query: str | None) -> dict | None:
+    """Resolve a Tehran neighbourhood name or alias to its canonical point."""
+    normalized = normalize(query or "")
+    if not normalized:
+        return None
+    for entry in TEHRAN_NEIGHBOURHOODS:
+        labels = (entry["name_fa"], *entry["aliases"])
+        if any(normalize(label) == normalized for label in labels):
+            return {
+                "label": entry["name_fa"],
+                "lat": entry["lat"],
+                "lon": entry["lon"],
+                "source": "fallback",
+            }
+    matches = []
+    for entry in TEHRAN_NEIGHBOURHOODS:
+        for label in (entry["name_fa"], *entry["aliases"]):
+            key = normalize(label)
+            if len(key) >= 3 and key in normalized:
+                matches.append((len(key), entry))
+    if not matches:
+        return None
+    entry = max(matches, key=lambda item: item[0])[1]
+    return {
+        "label": entry["name_fa"],
+        "lat": entry["lat"],
+        "lon": entry["lon"],
+        "source": "fallback",
+    }
+
+
+def search_neighbourhoods(query: str, limit: int = 8) -> list[dict]:
+    """Deterministic local suggestions for a typed Tehran neighbourhood."""
+    normalized = normalize(query)
+    if len(normalized) < 2:
+        return []
+    found: list[dict] = []
+    seen: set[str] = set()
+    for entry in TEHRAN_NEIGHBOURHOODS:
+        labels = (entry["name_fa"], *entry["aliases"])
+        if not any(normalized in normalize(label) or normalize(label) in normalized for label in labels):
+            continue
+        key = normalize(entry["name_fa"])
+        if key in seen:
+            continue
+        seen.add(key)
+        found.append({
+            "name_fa": entry["name_fa"],
+            "lat": entry["lat"],
+            "lon": entry["lon"],
+            "source": "fallback",
+        })
+    return found[: max(0, limit)]
