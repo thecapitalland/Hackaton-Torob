@@ -201,6 +201,70 @@ ACCESSORY_CATEGORIES: set[str] = {
     "محافظ صفحه",
 }
 
+# Search aliases are expanded as alternatives for one term; they are never
+# combined as an AND requirement. The first two groups cover common user
+# wording that differs from Torob's normalized catalog text.
+SEARCH_ALIASES: dict[str, tuple[str, ...]] = {
+    "کتونی": ("کتونی", "کتانی"),
+    "کتانی": ("کتونی", "کتانی"),
+    "نایک": ("نایک", "نایکی", "nike"),
+    "نایکی": ("نایک", "نایکی", "nike"),
+    "nike": ("نایک", "نایکی", "nike"),
+    "ایسوس": ("ایسوس", "asus"),
+    "asus": ("ایسوس", "asus"),
+    "سامسونگ": ("سامسونگ", "samsung"),
+    "samsung": ("سامسونگ", "samsung"),
+    "شیائومی": ("شیائومی", "xiaomi"),
+    "xiaomi": ("شیائومی", "xiaomi"),
+    "اپل": ("اپل", "apple"),
+    "apple": ("اپل", "apple"),
+    "انکر": ("انکر", "anker"),
+    "anker": ("انکر", "anker"),
+    "لنوو": ("لنوو", "lenovo"),
+    "lenovo": ("لنوو", "lenovo"),
+}
+
+BRAND_ALIASES: dict[str, tuple[str, ...]] = {
+    "نایک": ("نایک", "نایکی", "nike"),
+    "نایکی": ("نایک", "نایکی", "nike"),
+    "nike": ("نایک", "نایکی", "nike"),
+    "ایسوس": ("ایسوس", "asus"),
+    "asus": ("ایسوس", "asus"),
+    "سامسونگ": ("سامسونگ", "samsung"),
+    "samsung": ("سامسونگ", "samsung"),
+    "شیائومی": ("شیائومی", "xiaomi"),
+    "xiaomi": ("شیائومی", "xiaomi"),
+    "اپل": ("اپل", "apple"),
+    "apple": ("اپل", "apple"),
+    "انکر": ("انکر", "anker"),
+    "anker": ("انکر", "anker"),
+    "لنوو": ("لنوو", "lenovo"),
+    "lenovo": ("لنوو", "lenovo"),
+}
+
+# Product titles that describe accessories rather than the requested core
+# product. A term explicitly present in the user's query is not excluded.
+ACCESSORY_WORDS: set[str] = {
+    "کیسه",
+    "قاب",
+    "کاور",
+    "بند",
+    "واکس",
+    "کفی",
+    "جاکفشی",
+    "جالباسی",
+    "محافظ",
+    "گلس",
+    "پد",
+    "کیف",
+    "روکش",
+    "پایه",
+    "پایه نگهدارنده",
+    "لوازم جانبی",
+    "دستگاه واکس",
+    "نظم دهنده",
+}
+
 # Tehran bounding box used for the `in_bbox` flag.
 TEHRAN_BBOX = {"lat_min": 35.55, "lat_max": 35.85, "lon_min": 51.10, "lon_max": 51.65}
 

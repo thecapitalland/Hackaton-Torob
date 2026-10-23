@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import time
 from datetime import datetime
+from itertools import product as cartesian_product
 from typing import Any
 
 from langgraph.graph import END, START, StateGraph
@@ -30,10 +31,14 @@ from . import prompts, rules
 from .llm import get_client
 from .normalize import (
     ACCESSORY_CATEGORIES,
+    ACCESSORY_WORDS,
+    BRAND_ALIASES,
     CATEGORY_SYNONYMS,
     NEIGHBORHOODS,
+    SEARCH_ALIASES,
     fa_digits,
     normalize,
+    tokenize,
 )
 from .state import AgentState
 from .tools import catalog, haggle, markets, ooc, ranking, seller_sim
@@ -527,65 +532,160 @@ def clarify(state: AgentState) -> dict:
 # --------------------------------------------------------------------------
 
 
-def _search_with_fallback(slots: dict) -> tuple[list[dict], str]:
-    """Search the catalog, relaxing the keyword filter step by step.
+def _contains_phrase(text: str, phrase: str) -> bool:
+    words, needle = tokenize(text), tokenize(phrase)
+    if not needle or len(needle) > len(words):
+        return False
+    return any(words[index : index + len(needle)] == needle for index in range(len(words) - len(needle) + 1))
 
-    The strict AND-search is the most precise, but a query like «هدفون
-    بلوتوثی» would drop a product whose title does not literally contain
-    «بلوتوث» (for example the Anker R50i).  That is why the OR-search is
-    always merged in and the ranking (not the SQL order) decides.
+
+def _keyword_variants(words: list[str]) -> list[list[str]]:
+    """Expand known spelling aliases without requiring both spellings."""
+    groups = [SEARCH_ALIASES.get(normalize(word), (normalize(word),)) for word in words]
+    if not groups:
+        return [[]]
+    variants: list[list[str]] = []
+    for combination in cartesian_product(*groups):
+        candidate = list(dict.fromkeys(combination))
+        if candidate not in variants:
+            variants.append(candidate)
+        if len(variants) >= 12:
+            break
+    return variants
+
+
+def _requested_brand_groups(query: str) -> list[tuple[str, ...]]:
+    groups: list[tuple[str, ...]] = []
+    for marker, aliases in BRAND_ALIASES.items():
+        if _contains_phrase(query, marker) and aliases not in groups:
+            groups.append(aliases)
+    return groups
+
+
+def _product_matches_relevance(
+    item: dict,
+    query: str,
+    category: str | None,
+    core: str | None,
+    brand_groups: list[tuple[str, ...]],
+) -> bool:
+    title = str(item.get("persian_title") or "")
+    # With an exact dataset category, the category itself guarantees the core
+    # noun. Without one, preserve the core noun at every relaxation rung.
+    if core and not category and not any(
+        _contains_phrase(title, alias) for alias in rules.core_noun_aliases(core)
+    ):
+        return False
+
+    title_tokens = set(tokenize(title))
+    for word in ACCESSORY_WORDS:
+        if not _contains_phrase(query, word) and _contains_phrase(title, word):
+            return False
+
+    brand_text = " ".join(
+        str(item.get(key) or "")
+        for key in ("brand_name", "persian_title", "search_text")
+    )
+    for aliases in brand_groups:
+        if not any(alias in title_tokens or _contains_phrase(brand_text, alias) for alias in aliases):
+            return False
+    return True
+
+
+def _search_relevant_products(
+    keywords: list[str],
+    category: str | None,
+    budget_max: int | None,
+    budget_min: int | None,
+    query: str,
+    *,
+    limit: int = 40,
+) -> tuple[list[dict], str | None]:
+    """Run a relevance-preserving ladder; relax secondary terms, not the noun.
+
+    The ladder keeps going until three relevant products are collected. Every
+    result is then checked against core noun, explicit Nike spelling, and
+    accessory-title rules before it can contribute to that count.
     """
-    keywords = list(slots.get("keywords") or [])
-    category = slots.get("category")
-    budget_max = slots.get("budget_max")
-    budget_min = slots.get("budget_min")
-
-    def run(words: list[str], cat: str | None, min_shops: int, mode: str) -> list[dict]:
-        return catalog.search_products(
-            words,
-            cat,
+    core = rules.core_noun(query, category)
+    brand_groups = _requested_brand_groups(query)
+    selected_category = category
+    if not selected_category and core:
+        selected_category = _dominant_category(
+            keywords,
             budget_max,
             budget_min,
-            limit=30,
-            min_shops=min_shops,
-            match_mode=mode,
+            core=core,
+            query=query,
+            brand_groups=brand_groups,
+        ) or None
+
+    attempts: list[tuple[list[str], str | None, int, str]] = []
+    if keywords and selected_category:
+        attempts.extend(
+            [
+                (keywords, selected_category, 2, "all"),
+                (keywords, selected_category, 2, "any"),
+            ]
         )
+    attempts.extend(
+        [
+            (keywords, selected_category, 1, "all"),
+            (keywords, selected_category, 1, "any"),
+            (keywords[:1], selected_category, 2, "all"),
+            (keywords[:1], selected_category, 1, "any"),
+            ([], selected_category, 2, "all"),
+            ([], selected_category, 1, "all"),
+            (keywords, None, 1, "any"),
+            ([], None, 1, "all"),
+        ]
+    )
 
     merged: list[dict] = []
     seen: set[str] = set()
-
-    def collect(results: list[dict]) -> None:
-        for item in results:
-            if item["product_id"] in seen:
-                continue
-            seen.add(item["product_id"])
-            merged.append(item)
-
-    if keywords and category:
-        collect(run(keywords, category, 2, "all"))
-        collect(run(keywords, category, 2, "any"))
-    if merged:
-        merged.sort(key=lambda item: (-int(item.get("n_shops") or 0), int(item.get("min_price") or 0)))
-        return merged, f"{len(merged)} کالا در «{category}» پیدا شد"
-
-    attempts = [
-        (keywords, category, 2, "all"),
-        (keywords, category, 1, "any"),
-        (keywords[:1], category, 2, "all"),
-        ([], category, 2, "all"),
-        ([], category, 1, "all"),
-        (keywords, None, 1, "any"),
-        ([], None, 1, "all"),
-    ]
     for words, cat, min_shops, mode in attempts:
-        results = run(words, cat, min_shops, mode)
-        if results:
-            collect(results)
-            merged.sort(
-                key=lambda item: (-int(item.get("n_shops") or 0), int(item.get("min_price") or 0))
+        variants = _keyword_variants(words)
+        for variant in variants:
+            rows = catalog.search_products(
+                variant,
+                cat,
+                budget_max,
+                budget_min,
+                limit=max(limit, 200) if not cat and core else limit,
+                min_shops=min_shops,
+                match_mode=mode,
             )
-            return merged, f"{len(merged)} کالا با {'/'.join(words) if words else cat or 'همه'} پیدا شد"
-    return [], "نتیجه‌ای پیدا نشد"
+            for item in rows:
+                product_id = str(item.get("product_id") or "")
+                if not product_id or product_id in seen:
+                    continue
+                if not _product_matches_relevance(item, query, cat, core, brand_groups):
+                    continue
+                seen.add(product_id)
+                merged.append(item)
+        merged.sort(key=lambda item: (-int(item.get("n_shops") or 0), int(item.get("min_price") or 0)))
+        if len(merged) >= 3:
+            break
+    return merged[:limit], selected_category
+
+
+def _search_with_fallback(slots: dict) -> tuple[list[dict], str]:
+    """Search the catalog while keeping the product noun and user brand relevant."""
+    keywords = list(slots.get("keywords") or [])
+    category = slots.get("category")
+    query = str(slots.get("query") or " ".join(keywords))
+    products, selected_category = _search_relevant_products(
+        keywords,
+        category,
+        slots.get("budget_max"),
+        slots.get("budget_min"),
+        query,
+    )
+    if not products:
+        return [], "نتیجه‌ای پیدا نشد"
+    if selected_category:
+        return products, f"{len(products)} کالا در «{selected_category}» پیدا شد"
+    return products, f"{len(products)} کالای مرتبط پیدا شد"
 
 
 def search(state: AgentState) -> dict:
@@ -877,33 +977,25 @@ _DEFAULT_CHECKLIST = [
 ]
 
 
-def _compare_search(keywords: list[str], category: str | None, budget_max, budget_min) -> list[dict]:
-    """The compare-side search ladder: strict → relaxed → min_shops=1.
-
-    Some catalog entries (e.g. آدیداس models) are listed by a single shop
-    only - without the last rung those brands would look empty while their
-    products clearly exist.
-    """
-    if category:
-        products = catalog.search_products(
-            keywords, category, budget_max, budget_min, limit=40, min_shops=2, match_mode="all"
-        )
-    else:
-        products = catalog.search_products(
-            keywords, None, budget_max, budget_min, limit=40, min_shops=2, match_mode="all"
-        )
-    if not products:
-        products = catalog.search_products(
-            keywords, None, budget_max, budget_min, limit=40, min_shops=2, match_mode="any"
-        )
-    if not products:
-        products = catalog.search_products(
-            keywords, None, budget_max, budget_min, limit=40, min_shops=1, match_mode="any"
-        )
+def _compare_search(
+    keywords: list[str], category: str | None, budget_max, budget_min, query: str | None = None
+) -> list[dict]:
+    """Use the shared relevance ladder so comparison sides preserve core terms."""
+    products, _ = _search_relevant_products(
+        keywords, category, budget_max, budget_min, query or " ".join(keywords), limit=40
+    )
     return products
 
 
-def _dominant_category(keywords: list[str], budget_max, budget_min) -> str:
+def _dominant_category(
+    keywords: list[str],
+    budget_max,
+    budget_min,
+    *,
+    core: str | None = None,
+    query: str = "",
+    brand_groups: list[tuple[str, ...]] | None = None,
+) -> str:
     """Mode of the category across a wider pool for brand-only searches.
 
     A brand like نایک spans جوراب and کفش: the wider (min_shops=1) pool
@@ -911,9 +1003,28 @@ def _dominant_category(keywords: list[str], budget_max, budget_min) -> str:
     sock/shoes mixture.  Returns "" when no category dominates.
     """
     # ``search_products`` swallows sqlite errors and returns [] on its own
-    pool = catalog.search_products(
-        keywords, None, budget_max, budget_min, limit=40, min_shops=1, match_mode="any"
-    )
+    pool: list[dict] = []
+    for variant in _keyword_variants(keywords):
+        pool.extend(
+            catalog.search_products(
+                variant,
+                None,
+                budget_max,
+                budget_min,
+                limit=500 if core else 40,
+                min_shops=1,
+                match_mode="any",
+            )
+        )
+    pool = list({item["product_id"]: item for item in pool}.values())
+    if not pool:
+        return ""
+    if core:
+        pool = [
+            item
+            for item in pool
+            if _product_matches_relevance(item, query, None, core, brand_groups or [])
+        ]
     if not pool:
         return ""
     counts: dict[str, int] = {}
@@ -923,7 +1034,9 @@ def _dominant_category(keywords: list[str], budget_max, budget_min) -> str:
             counts[cat] = counts.get(cat, 0) + 1
     if not counts:
         return ""
-    dominant = max(counts.items(), key=lambda kv: kv[1])[0]
+    dominant, count = max(counts.items(), key=lambda kv: kv[1])
+    if core and count / len(pool) <= 0.60:
+        return ""
     return dominant
 
 
@@ -934,13 +1047,13 @@ def _compare_side_data(term: str, slots: dict) -> dict:
     budget_max = slots.get("budget_max")
     budget_min = slots.get("budget_min")
 
-    products = _compare_search(keywords, category, budget_max, budget_min)
+    products = _compare_search(keywords, category, budget_max, budget_min, term)
 
     # FIX4: a brand without a category must not mix جوراب and کفش - keep
     # only the dominant category of the wider result pool (its products are
     # kept whenever the filter would not empty the side).
     if not category and len(products) >= 2:
-        dominant = _dominant_category(keywords, budget_max, budget_min)
+        dominant = _dominant_category(keywords, budget_max, budget_min, query=term)
         if dominant:
             narrowed = [p for p in products if (p.get("category_name") or "").strip() == dominant]
             if narrowed:

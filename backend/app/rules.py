@@ -172,6 +172,67 @@ def detect_category(text: str, known_categories: list[str] | None = None) -> str
     return None
 
 
+_CORE_NOUN_MARKERS: tuple[tuple[str, str], ...] = (
+    ("لپ تاپ", "لپ تاپ"),
+    ("لپتاپ", "لپ تاپ"),
+    ("نوت بوک", "لپ تاپ"),
+    ("کفش ورزشی", "کفش ورزشی"),
+    ("کتونی", "کتونی"),
+    ("کتانی", "کتونی"),
+    ("هندزفری", "هدفون"),
+    ("ایربادز", "هدفون"),
+    ("ایرپاد", "هدفون"),
+    ("هدفون", "هدفون"),
+    ("هدست", "هدفون"),
+    ("موبایل", "گوشی"),
+    ("گوشی", "گوشی"),
+    ("آیفون", "گوشی"),
+    ("کفش", "کفش"),
+)
+
+CORE_NOUN_ALIASES: dict[str, tuple[str, ...]] = {
+    "لپ تاپ": ("لپ تاپ", "لپتاپ", "نوت بوک", "نوتبوک"),
+    "کتونی": ("کتونی", "کتانی"),
+    "کفش ورزشی": ("کفش ورزشی", "کتونی", "کتانی"),
+    "کفش": ("کفش",),
+    "هدفون": ("هدفون", "هدست", "هندزفری", "ایرپاد", "ایربادز"),
+    "گوشی": ("گوشی", "موبایل", "آیفون"),
+}
+
+_CATEGORY_CORE_NOUNS = {
+    "لپ تاپ و نوت بوک": "لپ تاپ",
+    "کتانی و کفش اسپرت": "کفش ورزشی",
+    "هدفون، هدست و هندزفری": "هدفون",
+    "گوشی موبایل": "گوشی",
+}
+
+
+def core_noun(text: str, category: str | None = None) -> str | None:
+    """Return the primary product noun for relevance-preserving search.
+
+    More specific terms win («کفش کتونی» -> «کتونی»); a recognized dataset
+    category supplies a noun when the user used only a synonym/brand.
+    """
+    normalized = normalize(text)
+    tokens = set(re.findall(r"[^\W_]+", normalized, flags=re.UNICODE))
+    matches: list[tuple[int, str]] = []
+    for marker, noun in _CORE_NOUN_MARKERS:
+        marker_tokens = normalize(marker).split()
+        if marker_tokens and all(token in tokens for token in marker_tokens):
+            # Use contiguous phrase matching so «کفش» does not match inside a
+            # longer unrelated token.
+            phrase = " ".join(marker_tokens)
+            if re.search(rf"(?<!\w){re.escape(phrase)}(?!\w)", normalized):
+                matches.append((len(phrase), noun))
+    if matches:
+        return max(matches, key=lambda item: item[0])[1]
+    return _CATEGORY_CORE_NOUNS.get(category or "")
+
+
+def core_noun_aliases(noun: str | None) -> tuple[str, ...]:
+    return CORE_NOUN_ALIASES.get(noun or "", (noun,) if noun else ())
+
+
 def detect_location(text: str) -> dict | None:
     """Find a known Tehran neighbourhood in the text."""
     if not text:
