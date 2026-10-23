@@ -231,3 +231,34 @@ def test_compare_no_location_near_unknown_and_full_checklist(catalog_path):
     assert any("جعبهٔ اصلی" in item for item in checklist)
     assert len(checklist) >= 4
 
+
+def test_selected_product_compare_endpoint_accepts_two_and_four_products(client, catalog_path):
+    products = catalog.search_products(
+        [], "گوشی موبایل", None, None, limit=8, min_shops=1, match_mode="any"
+    )
+    product_ids = [item["product_id"] for item in products[:4]]
+    assert len(product_ids) == 4
+    session_id = client.post("/api/session").json()["session_id"]
+
+    for count in (2, 4):
+        response = client.post(
+            "/api/compare",
+            json={"session_id": session_id, "product_ids": product_ids[:count]},
+        )
+        assert response.status_code == 200, response.text
+        comparison = response.json()["compare"]
+        assert comparison["verdict_label"] == "تحلیل ایجنت"
+        assert len(comparison["sides"]) == count
+        for side in comparison["sides"]:
+            assert side["best"]["product_id"] in product_ids[:count]
+            assert side["min"] <= side["median"] <= side["max"]
+
+
+@pytest.mark.parametrize("count", [1, 5])
+def test_selected_product_compare_endpoint_rejects_invalid_counts(client, count):
+    session_id = client.post("/api/session").json()["session_id"]
+    response = client.post(
+        "/api/compare",
+        json={"session_id": session_id, "product_ids": [f"product_{i}" for i in range(count)]},
+    )
+    assert response.status_code == 422

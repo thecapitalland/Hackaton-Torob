@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -31,6 +31,7 @@ from .data_static import (  # noqa: E402
     llm_mode,
     load_markets,
 )
+from . import graph as graph_module  # noqa: E402
 from .graph import build_graph  # noqa: E402
 from . import rules  # noqa: E402
 from . import normalize as normalize_utils  # noqa: E402
@@ -112,6 +113,11 @@ class SelectProductIn(BaseModel):
     session_id: str
     product_id: str
     sort: str = "recommended"
+
+
+class CompareProductsIn(BaseModel):
+    session_id: str
+    product_ids: list[str] = Field(min_length=2, max_length=4)
 
 
 class VerifyIn(BaseModel):
@@ -515,6 +521,27 @@ async def select_product(body: SelectProductIn) -> Any:
     payload["specialty_market"] = values.get("specialty_market")
     payload["map_center"] = _map_center(values.get("shops") or [])
     return payload
+
+
+@app.post("/api/compare")
+async def compare_selected_products(body: CompareProductsIn) -> dict:
+    if len(set(body.product_ids)) != len(body.product_ids):
+        raise HTTPException(status_code=422, detail="product_ids must be unique")
+    values = _state_snapshot(body.session_id)["values"]
+    try:
+        comparison = graph_module.compare_products(
+            body.product_ids, values.get("slots") or {}
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Unknown product id") from exc
+    return {
+        "session_id": body.session_id,
+        "phase": "compare",
+        "mode": "compare",
+        "compare": comparison,
+        "slots": values.get("slots") or {},
+        "messages": [],
+    }
 
 
 @app.post("/api/verify")

@@ -1068,6 +1068,79 @@ def _compare_side_payload(side: dict) -> dict:
     }
 
 
+def compare_products(product_ids: list[str], slots: dict | None = None) -> dict:
+    """Build the existing CompareCard contract for 2–4 explicitly chosen products."""
+    slots = slots or {}
+    location = slots.get("location") or {}
+    user_lat, user_lon = location.get("lat"), location.get("lon")
+    sides: list[dict] = []
+    for product_id in product_ids:
+        product = catalog.get_product(product_id)
+        if not product:
+            raise ValueError(f"unknown product id: {product_id}")
+        offers = catalog.get_offers_for_product(product_id)
+        pseudo = [
+            {
+                "price_toman": int(offer.get("price_toman") or 0),
+                "shop_id": offer.get("shop_id"),
+                "lat": offer.get("lat"),
+                "lon": offer.get("lon"),
+            }
+            for offer in offers
+            if offer.get("price_toman") and offer.get("shop_id")
+        ]
+        stats = haggle.price_stats(pseudo)
+        near: set[str] = set()
+        if user_lat is not None and user_lon is not None:
+            for offer in pseudo:
+                distance = haversine_m(user_lat, user_lon, offer.get("lat"), offer.get("lon"))
+                if distance is not None and distance <= COMPARE_NEAR_M:
+                    near.add(offer["shop_id"])
+        title = product.get("persian_title") or product_id
+        side = {
+            "label": title,
+            "n_models": 1,
+            "n_shops": stats["n_shops"],
+            "n_near": len(near) if user_lat is not None and user_lon is not None else None,
+            "min": stats["min"],
+            "max": stats["max"],
+            "median": stats["median"],
+            "replica": rules.replica_flag(title),
+            "titles_sample": [title],
+            "best": {
+                "product_id": product_id,
+                "title": title,
+                "min_price": stats["min"],
+                "n_shops": stats["n_shops"],
+            },
+        }
+        sides.append(side)
+
+    if len(sides) == 2:
+        verdict = _compare_verdict_template(sides[0], sides[1])
+    else:
+        available = [side for side in sides if side["n_shops"] and side["median"]]
+        if available:
+            winner = min(available, key=lambda side: side["median"])
+            verdict = (
+                f"کمترین میانهٔ قیمت برای «{winner['label']}» است: "
+                f"{rules.price_fa(winner['median'])} تومان. "
+                f"این مقایسه بر پایهٔ {fa_digits(str(len(available)))} گزینهٔ دارای فروشگاه است؛ "
+                "قیمت و موجودی را پیش از خرید بررسی کن."
+            )
+        else:
+            verdict = "برای گزینه‌های انتخاب‌شده عرضه‌ای در داده‌های ترب پیدا نکردم."
+    replica = any(side["replica"] for side in sides)
+    return {
+        "title": "مقایسهٔ انتخابی‌ها",
+        "sides": sides,
+        "verdict": verdict,
+        "verdict_label": "تحلیل ایجنت",
+        "warning": _REPLICA_WARNING if replica else None,
+        "checklist": list(_DEFAULT_CHECKLIST),
+    }
+
+
 def compare(state: AgentState) -> dict:
     started = time.time()
     slots = state.get("slots") or {}
