@@ -6,7 +6,7 @@ import { categoryIcon } from "./category";
 import { bestConfirmedName, tripPlanningReachable } from "./followups";
 import { cheaperAlert, fairnessLabel, medianLine } from "./haggle";
 import { isShopInMarket, shopsInMarket } from "./market";
-import { shopLocationLine } from "./shop";
+import { filterByRadius, shopLocationLine, toggleCompare } from "./shop";
 import { buildTripLine } from "./trip";
 import type { Haggle } from "../types";
 
@@ -177,7 +177,7 @@ describe("haggle badges and alert (Phase 2)", () => {
   };
 
   it("maps fairness labels to Persian badges", () => {
-    expect(fairnessLabel("expensive")).toEqual({ text: "گرون", tone: "danger" });
+    expect(fairnessLabel("expensive")).toEqual({ text: "گران", tone: "danger" });
     expect(fairnessLabel("normal")).toEqual({ text: "معمولی", tone: "muted" });
     expect(fairnessLabel("good")).toEqual({ text: "خوب قیمت", tone: "success" });
     expect(fairnessLabel("single")).toEqual({ text: "بدون مقایسه", tone: "neutral" });
@@ -195,7 +195,7 @@ describe("haggle badges and alert (Phase 2)", () => {
     expect(alert).toContain("۱۸۰ متر");
     expect(alert).toContain("نیکینا رووش");
     expect(alert).toContain("۱٬۱۷۰٬۰۰۰");
-    expect(alert).toContain("ارزون‌تره");
+    expect(alert).toContain("قیمت پایین‌تر");
     expect(alert).not.toMatch(/[0-9]/);
   });
 
@@ -257,5 +257,24 @@ describe("shop location line (QA3 B4)", () => {
     const line = shopLocationLine("", "3");
     expect(line).toBe("طبقه ۳");
     expect(line.startsWith("·") || line.endsWith("·")).toBe(false);
+  });
+});
+
+describe("radius and compare selection (UX)", () => {
+  it("filters by straight-line radius and leaves whole-city results untouched", () => {
+    const near = makeShop({ shop_id: "near", lat: 35.696, lon: 51.412 });
+    const far = makeShop({ shop_id: "far", lat: 35.8, lon: 51.5 });
+    const noPoint = makeShop({ shop_id: "no-point", lat: null, lon: null });
+    const origin = { label: "مبدأ", lat: 35.695, lon: 51.4115 };
+    expect(filterByRadius([near, far, noPoint], origin, 2).map((shop) => shop.shop_id)).toEqual([
+      "near",
+    ]);
+    expect(filterByRadius([near, far, noPoint], origin, null)).toHaveLength(3);
+  });
+
+  it("adds/removes selected products and stops at the maximum", () => {
+    expect(toggleCompare([], "a")).toEqual(["a"]);
+    expect(toggleCompare(["a", "b"], "a")).toEqual(["b"]);
+    expect(toggleCompare(["a", "b", "c", "d"], "e")).toEqual(["a", "b", "c", "d"]);
   });
 });

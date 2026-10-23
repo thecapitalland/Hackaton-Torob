@@ -1031,7 +1031,7 @@ def _compare_verdict_template(side_a: dict, side_b: dict) -> str:
         return (
             f"برای «{other['label']}» در داده‌های ترب عرضه‌ای پیدا نکردم. "
             f"«{solo['label']}» با {fa_digits(str(solo['n_shops']))} فروشگاه و "
-            f"میانهٔ {rules.price_fa(solo['median'])} تومان در دسترس است. تصمیم با تو."
+            f"میانهٔ {rules.price_fa(solo['median'])} تومان در دسترس است. انتخاب با شماست."
         )
 
     cheaper, dearer = sorted(
@@ -1040,7 +1040,7 @@ def _compare_verdict_template(side_a: dict, side_b: dict) -> str:
     parts: list[str] = []
     if cheaper["median"] != dearer["median"]:
         parts.append(
-            f"برای قیمت، «{cheaper['label']}» به‌صرفه‌تره (میانهٔ {rules.price_fa(cheaper['median'])} "
+            f"برای قیمت، «{cheaper['label']}» به‌صرفه‌تر است (میانهٔ {rules.price_fa(cheaper['median'])} "
             f"تومان در {fa_digits(str(cheaper['n_shops']))} فروشگاه، در برابر "
             f"{rules.price_fa(dearer['median'])} تومان در {fa_digits(str(dearer['n_shops']))} فروشگاه)."
         )
@@ -1050,7 +1050,7 @@ def _compare_verdict_template(side_a: dict, side_b: dict) -> str:
         )
     if cheaper["n_shops"] < dearer["n_shops"]:
         parts.append(
-            f"ولی «{dearer['label']}» انتخاب بیشتری می‌ده "
+            f"اما «{dearer['label']}» گزینه‌های بیشتری دارد "
             f"({fa_digits(str(dearer['n_shops']))} فروشگاه در برابر "
             f"{fa_digits(str(cheaper['n_shops']))})."
         )
@@ -1060,10 +1060,10 @@ def _compare_verdict_template(side_a: dict, side_b: dict) -> str:
         closer = max((side_a, side_b), key=lambda side: side["n_near"])
         if closer["n_near"]:
             parts.append(
-                f"نزدیک به تو هم «{closer['label']}» با "
+                f"در شعاع نزدیک، «{closer['label']}» با "
                 f"{fa_digits(str(closer['n_near']))} فروشگاه در ۵ کیلومتری گزینه‌های بیشتری دارد."
             )
-    parts.append("تصمیم با تو: بسته به اینکه قیمت برات مهم‌تره یا تنوع و نزدیکی مسیر، یکی از این دو را انتخاب کن.")
+    parts.append("انتخاب با شماست؛ قیمت، تنوع و نزدیکی مسیر را در نظر بگیرید.")
     return " ".join(parts)
 
 
@@ -1298,8 +1298,8 @@ def find_stores(state: AgentState) -> dict:
         "messages": [
             {
                 "role": "assistant",
-                "content": f"{fa_digits(str(len(options)))} فروشگاه این مدل رو دارن. "
-                "می‌خوای از چند تا ازشون بپرسم موجوده؟",
+                "content": f"{fa_digits(str(len(options)))} فروشگاه این مدل را عرضه می‌کنند. "
+                "مایل هستید موجودی را از چند فروشگاه بپرسم؟",
             }
         ],
         "trace": [
@@ -1728,7 +1728,7 @@ def build_trip(state: AgentState) -> dict:
             else:
                 summary += " (موجودیش هنوز تأیید نشده، بپرس بعدش)"
             if first.get("walk_min_est"):
-                summary += f"؛ حدود {fa_digits(str(first['walk_min_est']))} دقیقه پیاده راه می‌فتهی (تخمینی)."
+                summary += f"؛ حدود {fa_digits(str(first['walk_min_est']))} دقیقه پیاده‌روی (تخمینی)."
             if cafe:
                 summary += f" بعدش کافهٔ «{cafe['name']}» برای یک استراحت کوتاه (پیشنهاد نمونه)."
             if backup:

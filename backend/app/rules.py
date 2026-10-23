@@ -450,17 +450,17 @@ def is_skip_answer(text: str) -> bool:
 
 CLARIFY_QUESTIONS = {
     "budget": {
-        "text": "چند تومن بودجه‌ات توی ذهنته؟",
+        "text": "بودجهٔ تقریبی شما چقدر است؟",
         "chips": ["تا ۵ میلیون", "تا ۱۰ میلیون", "مهم نیست"],
     },
     "location": {
-        "text": "کدوم محله برات نزدیک‌تره؟",
+        "text": "کدام محله برای خریدتان مناسب‌تر است؟",
         # FIX5: no fake fixed hoods — the user types, shares GPS, or picks
         # on the map; keeping only the skip answer as a chip
         "chips": ["مهم نیست"],
     },
     "payment": {
-        "text": "پرداخت قسطی/ترب‌پی برات مهمه؟",
+        "text": "پرداخت قسطی یا ترب‌پی برایتان مهم است؟",
         "chips": ["آره، قسطی", "نقد می‌خرم", "مهم نیست"],
     },
 }
@@ -648,14 +648,14 @@ def haggle_lines(
 
     if leverage:
         distance = leverage.get("delta_m") or leverage.get("distance_m")
-        where = "توی همین پاساژ" if leverage.get("same_mall") else "همین نزدیکی"
+        where = "در همین پاساژ" if leverage.get("same_mall") else "در همین نزدیکی"
         first = (
-            f"همین مدل رو «{leverage.get('name')}» "
-            f"{price_fa(leverage.get('price'))} می‌ده"
+            f"این مدل در فروشگاه «{leverage.get('name')}» "
+            f"با {price_fa(leverage.get('price'))} عرضه می‌کند"
         )
         if distance:
             first += f"، {distance_fa(distance)} اون‌طرف‌تر"
-        first += f" ({where})."
+        first += f"؛ {where}."
         lines.append(first)
     elif n_shops < 2:
         lines.append("مقایسه ممکن نیست؛ فقط یک فروشگاه این مدل را دارد.")
@@ -664,12 +664,12 @@ def haggle_lines(
         lines.append(f"«با {price_fa(target)} حضوری می‌دید؟»")
     elif n_shops >= 2:
         lines.append(
-            f"قیمتت از میانهٔ {fa_digits(str(n_shops))} فروشگاه "
-            f"({price_fa(median)}) پایین‌تره؛ روی گارانتی و فاکتور چانه بزن."
+            f"قیمت از میانهٔ {fa_digits(str(n_shops))} فروشگاه "
+            f"({price_fa(median)}) پایین‌تر است؛ دربارهٔ ضمانت و فاکتور مذاکره کنید."
         )
 
     if ceiling and len(lines) < 3:
-        lines.append(f"سقف خرید: {price_fa(ceiling)}؛ بالاتر نرو.")
+        lines.append(f"سقف خرید: {price_fa(ceiling)}؛ از آن بیشتر پرداخت نکنید.")
     if not lines:
         lines.append("قیمت نهایی را قبل از پرداخت حضوری تأیید کن.")
     return lines[:3]
@@ -690,19 +690,19 @@ def draft_message(
     """Fallback message the agent would send to the shop."""
     parts = [
         "سلام وقت بخیر 🌱",
-        "از طرف یک خریدار با دستیار «تربچه» پیام می‌دم.",
+        "از طرف یک خریدار و با دستیار «ترب‌چه» پیام می‌دهم.",
         f"دربارهٔ {product_title}:",
     ]
     if today:
-        parts.append("امروز موجوده؟")
+        parts.append("امروز موجود است؟")
     else:
-        parts.append("موجوده؟")
-    parts.append("قیمت نهایی برای خرید حضوری چنده؟")
+        parts.append("موجود است؟")
+    parts.append("قیمت نهایی خرید حضوری چقدر است؟")
     if target_price:
         parts.append(f"با {price_fa(target_price)} حضوری می‌دید؟")
-    parts.append("تا چه ساعتی بازید؟")
+        parts.append("تا چه ساعتی باز هستید؟")
     if installment:
-        parts.append("اقساطی/ترب‌پی دارید؟")
+        parts.append("پرداخت قسطی یا ترب‌پی دارید؟")
     parts.append("ممنون")
     return " ".join(parts)
 
@@ -712,7 +712,7 @@ def ooc_message(query: str, market_name: str | None = None) -> str:
         return (
             f"«{query}» را در داده‌های ترب پیدا نکردم. "
             f"معمولاً بورس این کالا در تهران «{market_name}» است؛ "
-            "آنجا معمولاً چند فروشندهٔ تخصصی هست."
+            "آنجا معمولاً چند فروشندهٔ تخصصی فعالیت می‌کنند."
         )
     return f"«{query}» را در داده‌های ترب پیدا نکردم."
 

@@ -3,6 +3,7 @@ import { useState } from "react";
 import { copy } from "../copy.fa";
 import { faDigits, formatPriceShort } from "../format";
 import type { MoreItem, ProductCard } from "../types";
+import { toggleCompare } from "../lib/shop";
 import { Chip } from "./ui";
 
 const RIBBONS: Record<string, { label: string; className: string }> = {
@@ -16,15 +17,17 @@ export function ProductCards({
   more,
   onSelect,
   onSelectMore,
+  onCompare,
 }: {
   cards: ProductCard[];
   more: MoreItem[];
   onSelect: (productId: string) => void;
   onSelectMore: (productId: string) => void;
+  onCompare?: (productIds: string[]) => void;
 }) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [showMore, setShowMore] = useState(false);
-  const [compare, setCompare] = useState(false);
+  const [selected, setSelected] = useState<string[]>([]);
 
   if (!cards.length) return null;
 
@@ -32,30 +35,36 @@ export function ProductCards({
     <section className="space-y-3">
       <div className="flex items-center justify-between px-1">
         <h2 className="text-[16px] font-bold">{copy.cards.title}</h2>
-        {cards.length > 1 ? (
-          <button
-            onClick={() => setCompare((value) => !value)}
-            className="rounded-full border border-brand-border bg-white px-3 py-1.5 text-[12px] text-brand-muted"
-          >
-            {compare ? copy.cards.hideCompare : copy.cards.compare}
-          </button>
-        ) : null}
+        {cards.length > 1 && selected.length >= 4 ? <span className="text-[11px] text-brand-muted">{copy.cards.compareLimit}</span> : null}
       </div>
 
-      <div className="no-scrollbar -mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-2">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         {cards.map((card) => {
           const ribbon = RIBBONS[card.kind] ?? RIBBONS.best;
           const isOpen = expanded === card.product_id;
+          const isSelected = selected.includes(card.product_id);
+          const disabled = selected.length >= 4 && !isSelected;
           return (
             <motion.article
               key={card.product_id}
               layout
               initial={{ opacity: 0, y: 14 }}
               animate={{ opacity: 1, y: 0 }}
-              className="w-[268px] shrink-0 snap-center overflow-hidden rounded-card border border-brand-border bg-white shadow-card"
+              className="overflow-hidden rounded-card border border-brand-border bg-white shadow-card"
             >
-              <div className={`${ribbon.className} px-3 py-1.5 text-[12px] font-bold text-white`}>
-                {ribbon.label}
+              <div className={`${ribbon.className} flex items-center justify-between px-3 py-1.5 text-[12px] font-bold text-white`}>
+                <span>{ribbon.label}</span>
+                {onCompare ? (
+                  <button
+                    type="button"
+                    disabled={disabled}
+                    aria-pressed={isSelected}
+                    onClick={() => setSelected((prev) => toggleCompare(prev, card.product_id, 4))}
+                    className="rounded-full bg-white/20 px-2.5 py-1 disabled:opacity-50"
+                  >
+                    {isSelected ? "✓ " : ""}{copy.cards.compareSelect}
+                  </button>
+                ) : null}
               </div>
               <div className="flex gap-3 p-3">
                 <div className="h-20 w-20 shrink-0 overflow-hidden rounded-xl bg-brand-bg">
@@ -138,8 +147,15 @@ export function ProductCards({
         })}
       </div>
 
-      {compare && cards.length > 1 ? (
-        <CompareTable cards={cards} />
+      {selected.length >= 2 && onCompare ? (
+        <div className="sticky bottom-20 z-20 rounded-2xl border border-brand-border bg-white/95 p-2 shadow-card backdrop-blur">
+          <button
+            onClick={() => onCompare(selected)}
+            className="w-full rounded-xl bg-brand-red py-3 text-[13px] font-bold text-white"
+          >
+            {copy.cards.compareSelected} ({faDigits(selected.length)})
+          </button>
+        </div>
       ) : null}
 
       {more.length ? (
@@ -191,51 +207,5 @@ export function ProductCards({
   );
 }
 
-function CompareTable({ cards }: { cards: ProductCard[] }) {
-  return (
-    <div className="overflow-x-auto rounded-card border border-brand-border bg-white p-3 shadow-card">
-      <table className="w-full text-right text-[12px]">
-        <thead>
-          <tr className="text-brand-muted">
-            <th className="p-1 font-medium">ویژگی</th>
-            {cards.map((card) => (
-              <th key={card.product_id} className="p-1 font-medium">
-                <span className="line-clamp-2">{card.title}</span>
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody className="align-top">
-          <tr className="border-t border-brand-border">
-            <td className="p-1 text-brand-muted">قیمت</td>
-            {cards.map((card) => (
-              <td key={card.product_id} className="p-1 font-bold text-brand-red">
-                {formatPriceShort(card.min_price)}
-              </td>
-            ))}
-          </tr>
-          <tr className="border-t border-brand-border">
-            <td className="p-1 text-brand-muted">تعداد فروشگاه</td>
-            {cards.map((card) => (
-              <td key={card.product_id} className="p-1">
-                {faDigits(card.n_shops)}
-              </td>
-            ))}
-          </tr>
-          <tr className="border-t border-brand-border">
-            <td className="p-1 text-brand-muted">ویژگی‌ها</td>
-            {cards.map((card) => (
-              <td key={card.product_id} className="p-1 text-brand-muted">
-                {card.highlights.slice(0, 3).map((item) => (
-                  <p key={item}>• {item}</p>
-                ))}
-              </td>
-            ))}
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  );
-}
 
 export { Chip };

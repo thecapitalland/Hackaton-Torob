@@ -165,6 +165,13 @@ export interface GeoAddress {
   source: "neshan" | "fallback";
 }
 
+export interface GeoSuggestion {
+  name_fa: string;
+  lat: number;
+  lon: number;
+  source: "neshan" | "fallback";
+}
+
 export interface RouteInfo {
   distance_m: number;
   duration_min: number;

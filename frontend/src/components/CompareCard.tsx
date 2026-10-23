@@ -23,13 +23,15 @@ function SideRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function SideTable({ side, onPick }: { side: CompareSide; onPick: (productId: string) => void }) {
+function SideTable({ side, onPick, winner, moreShops, marker, rangeStart, rangeWidth }: { side: CompareSide; onPick: (productId: string) => void; winner: boolean; moreShops: boolean; marker: number; rangeStart: number; rangeWidth: number }) {
   const best = side.best;
   const body = (
     <>
       <div className="mb-1.5 flex items-center justify-between gap-2">
         <span className="truncate text-[13.5px] font-bold">«{side.label}»</span>
-        {side.replica ? (
+        {winner ? (
+          <span className="shrink-0 rounded-full bg-brand-green px-2 py-0.5 text-[10px] font-bold text-white">{copy.compare.winner}</span>
+        ) : side.replica ? (
           <span className="shrink-0 rounded-full bg-brand-amber/15 px-2 py-0.5 text-[10px] font-bold text-brand-amber">
             {copy.compare.replicaNote}
           </span>
@@ -43,6 +45,14 @@ function SideTable({ side, onPick }: { side: CompareSide; onPick: (productId: st
             : "—"
         }
       />
+      <div className="relative mt-2 h-2 rounded-full bg-brand-border" aria-label={copy.compare.priceMarker}>
+        <span className="absolute inset-y-0 rounded-full bg-brand-red/30" style={{ left: `${rangeStart}%`, width: `${rangeWidth}%` }} />
+        <span className="absolute -top-1 h-4 w-4 rounded-full border-2 border-white bg-brand-red shadow" style={{ left: `calc(${marker}% - 8px)` }} />
+      </div>
+      <div className="mt-2 space-y-1 text-[10.5px] text-brand-muted">
+        <p>{winner ? "✓" : "✗"} {copy.compare.lowerMedian}</p>
+        <p>{moreShops ? "✓" : "✗"} {copy.compare.moreShops}: {faDigits(side.n_shops)}</p>
+      </div>
       <SideRow
         label={copy.compare.median}
         value={side.median > 0 ? formatPrice(side.median) : "—"}
@@ -82,8 +92,12 @@ export function CompareCard({
   onPickSide: (productId: string) => void;
 }) {
   const sides = compare.sides ?? [];
-  const [sideA, sideB] = sides;
-  const noData = !sideA?.n_shops && !sideB?.n_shops;
+  const noData = !sides.some((side) => side.n_shops > 0);
+  const prices = sides.flatMap((side) => [side.min, side.max, side.median]).filter((value) => value > 0);
+  const minPrice = prices.length ? Math.min(...prices) : 0;
+  const maxPrice = prices.length ? Math.max(...prices) : 1;
+  const winner = sides.filter((side) => side.n_shops > 0 && side.median > 0).sort((a, b) => a.median - b.median)[0];
+  const mostShops = Math.max(0, ...sides.map((side) => side.n_shops));
 
   return (
     <motion.section
@@ -98,9 +112,13 @@ export function CompareCard({
           {copy.compare.notEnough}
         </p>
       ) : (
-        <div className="grid grid-cols-2 gap-2">
-          {sideA ? <SideTable side={sideA} onPick={onPickSide} /> : null}
-          {sideB ? <SideTable side={sideB} onPick={onPickSide} /> : null}
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          {sides.map((side) => {
+            const marker = maxPrice === minPrice ? 50 : ((side.median - minPrice) / (maxPrice - minPrice)) * 100;
+            const rangeStart = maxPrice === minPrice ? 0 : ((side.min - minPrice) / (maxPrice - minPrice)) * 100;
+            const rangeEnd = maxPrice === minPrice ? 100 : ((side.max - minPrice) / (maxPrice - minPrice)) * 100;
+            return <SideTable key={side.best?.product_id ?? side.label} side={side} onPick={onPickSide} winner={side === winner} moreShops={side.n_shops === mostShops && mostShops > 0} marker={Math.max(4, Math.min(96, marker))} rangeStart={Math.max(0, rangeStart)} rangeWidth={Math.max(2, Math.min(100 - rangeStart, rangeEnd - rangeStart))} />;
+          })}
         </div>
       )}
 

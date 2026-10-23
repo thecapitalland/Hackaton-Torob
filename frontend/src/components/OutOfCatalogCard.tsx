@@ -29,6 +29,17 @@ export function OutOfCatalogCard({
       {ooc.alternatives?.length ? (
         <div>
           <h4 className="mb-2 text-[13.5px] font-bold">{copy.ooc.closest}</h4>
+          <div className="mb-2 flex flex-wrap gap-2">
+            {[...new Map(ooc.alternatives.filter((item) => item.category_name).map((item) => [item.category_name!, item])).values()].map((item) => (
+              <button
+                key={`category-${item.category_name}`}
+                onClick={() => onPickAlternative(item.product_id)}
+                className="rounded-full border border-brand-border bg-brand-bg px-3 py-1.5 text-[11.5px] font-medium"
+              >
+                {item.category_name}
+              </button>
+            ))}
+          </div>
           <ul className="space-y-2">
             {ooc.alternatives.map((item) => (
               <li key={item.product_id}>

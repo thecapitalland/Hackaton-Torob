@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { ApiError, api } from "./api";
 import { copy } from "./copy.fa";
-import { faDigits, formatPrice } from "./format";
+import { faDigits } from "./format";
 import { shopsInMarket } from "./lib/market";
 import type {
   ApiResponse,
@@ -21,7 +21,7 @@ import type {
   TraceEntry,
   Trip,
 } from "./types";
-import { SlotPills, TypingIndicator } from "./components/Chat";
+import { TypingIndicator } from "./components/Chat";
 import { ProductCards } from "./components/ProductCards";
 import { MarketCard } from "./components/MarketCard";
 import { OutOfCatalogCard } from "./components/OutOfCatalogCard";
@@ -31,15 +31,11 @@ import { PermissionSheet } from "./components/PermissionSheet";
 import { Inbox } from "./components/Inbox";
 import { TripPlan } from "./components/TripPlan";
 import { TraceDrawer } from "./components/TraceDrawer";
-import { Chip } from "./components/ui";
+import { Chip, Sheet } from "./components/ui";
 import { MapView } from "./components/MapView";
-
-const NEIGHBORHOODS: Record<string, SlotLocation> = {
-  فردوسی: { label: "میدان فردوسی", lat: 35.701, lon: 51.4187 },
-  جمهوری: { label: "خیابان جمهوری", lat: 35.6925, lon: 51.4105 },
-  ولیعصر: { label: "خیابان ولیعصر", lat: 35.7, lon: 51.406 },
-  تجریش: { label: "تجریش", lat: 35.804, lon: 51.433 },
-};
+import { LocationModal } from "./components/LocationModal";
+import { SummaryBar } from "./components/SummaryBar";
+import { filterByRadius } from "./lib/shop";
 
 export default function App() {
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -66,6 +62,9 @@ export default function App() {
   const [traceOpen, setTraceOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [location, setLocation] = useState<SlotLocation | null>(null);
+  const [locationOpen, setLocationOpen] = useState(false);
+  const [mapOpen, setMapOpen] = useState(false);
+  const [radiusKm, setRadiusKm] = useState<number | null>(null);
   const [routes, setRoutes] = useState<Record<string, RouteInfo>>({});
   const [tripRoute, setTripRoute] = useState<RouteInfo | null>(null);
   const routesKeyRef = useRef<string | null>(null);
@@ -98,7 +97,10 @@ export default function App() {
     if (response.trace?.length) {
       setTrace((prev) => [...prev, ...response.trace]);
     }
-    if (response.slots) setSlots(response.slots);
+    if (response.slots) {
+      setSlots(response.slots);
+      if (response.slots.location) setLocation(response.slots.location);
+    }
     setPending(response.pending ?? null);
     if (response.cards) setCards(response.cards);
     if (response.more) setMore(response.more);
@@ -322,53 +324,30 @@ export default function App() {
     setToast(copy.haggle.addedToRoute);
   };
 
-  const useMyLocation = () => {
-    if (!navigator.geolocation) {
-      setToast("دسترسی به موقعیت در این مرورگر نیست");
-      return;
+  const chooseLocation = async (next: SlotLocation) => {
+    setLocation(next);
+    setSlots((prev) => ({ ...prev, location: next }));
+    setRoutes({});
+    routesKeyRef.current = null;
+    if (!started || !sessionId) return;
+    try {
+      const response = await api.updateLocation(sessionId, next);
+      applyResponse(response);
+    } catch (error) {
+      handleError(error);
     }
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const current: SlotLocation = {
-          label: "موقعیت فعلی شما",
-          lat: position.coords.latitude,
-          lon: position.coords.longitude,
-        };
-        setLocation(current);
-        setSlots((prev) => ({ ...prev, location: current }));
-        setMessages((prev) => [
-          ...prev,
-          { role: "user", content: "می‌خواهم نزدیک موقعیت فعلیم بخرم" },
-        ]);
-        // Update #1: tell the user WHERE they are (Neshan, server fallback)
-        api
-          .geoReverse(current.lat, current.lon)
-          .then((address) => {
-            const where = address.neighbourhood || address.formatted_address;
-            if (!where) return;
-            setMessages((prev) => [
-              ...prev,
-              {
-                role: "assistant",
-                content:
-                  address.source === "fallback"
-                    ? `📍 حوالی «${where}» هستید (موقعیت تخمینی).`
-                    : `📍 شما نزدیک «${where}» هستید.`,
-              },
-            ]);
-          })
-          .catch(() => undefined);
-      },
-      () => setToast("اجازهٔ دسترسی به موقعیت داده نشد"),
-    );
   };
 
-  const chooseNeighborhood = (name: string) => {
-    const place = NEIGHBORHOODS[name];
-    if (!place) return;
-    setLocation(place);
-    setSlots((prev) => ({ ...prev, location: place }));
-    setMessages((prev) => [...prev, { role: "user", content: `نزدیک ${name}` }]);
+  const compareSelected = async (productIds: string[]) => {
+    if (!sessionId || busy || productIds.length < 2) return;
+    setBusy(true);
+    try {
+      applyResponse(await api.compareProducts(sessionId, productIds));
+    } catch (error) {
+      handleError(error);
+    } finally {
+      setBusy(false);
+    }
   };
 
   // ------------------------------------------------------------- render
@@ -376,15 +355,15 @@ export default function App() {
   const pendingApproval = pending && pending.type === "approval" ? pending : null;
   // P1.6: the market filter applies to the list *and* the map at the same time
   const visibleShops = useMemo(
-    () => shopsInMarket(shops, marketFilter),
-    [shops, marketFilter],
+    () => filterByRadius(shopsInMarket(shops, marketFilter), location ?? slots.location, radiusKm),
+    [shops, marketFilter, location, slots.location, radiusKm],
   );
 
   return (
     <div className="min-h-screen bg-brand-bg">
-      <div className="flex min-h-screen w-full flex-col xl:flex-row">
+      <div className="flex min-h-screen w-full flex-col">
         {/* ---------------- chat column (right side in RTL, ~40%) ---------------- */}
-        <div className="flex w-full flex-col xl:w-[40%] xl:max-w-[760px] xl:border-l xl:border-brand-border/70">
+        <div className="flex w-full flex-col xl:mx-auto xl:max-w-[960px] xl:border-x xl:border-brand-border/70">
           {/* header */}
           <header className="sticky top-0 z-30 flex items-center justify-between border-b border-brand-border bg-brand-bg/95 px-4 py-3 backdrop-blur">
             <div className="flex items-center gap-2">
@@ -396,20 +375,36 @@ export default function App() {
                 <p className="text-[10.5px] text-brand-gray">{copy.tagline}</p>
               </div>
             </div>
-            <button
-              onClick={() => setTraceOpen(true)}
-              className="flex h-10 w-10 items-center justify-center rounded-xl border border-brand-border bg-white text-[16px]"
-              aria-label={copy.trace.title}
-            >
-              🧠
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setLocationOpen(true)}
+                className="max-w-[180px] truncate rounded-full border border-brand-border bg-white px-3 py-2 text-[11px] font-bold"
+              >
+                📍 {location?.label ?? slots.location?.label ?? copy.home.location} · {copy.home.changeLocation}
+              </button>
+              <button
+                onClick={() => setTraceOpen(true)}
+                className="flex h-10 w-10 items-center justify-center rounded-xl border border-brand-border bg-white text-[16px]"
+                aria-label={copy.trace.title}
+              >
+                🧠
+              </button>
+            </div>
           </header>
 
-          <SlotPills slots={slots} />
-
-          <main className="flex-1 space-y-4 px-4 pb-4 pt-2">
+          <main className="flex-1 space-y-4 px-4 pb-4 pt-2 xl:flex-none">
             {!started ? (
               <section className="space-y-4 pt-4">
+                <p className="text-[13px] leading-6 text-brand-muted">{copy.home.greeting}</p>
+                <div className="rounded-card border border-brand-border bg-white p-3 shadow-card">
+                  <div className="mb-2 text-[14px] font-bold">{copy.home.location}</div>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                    <button onClick={() => setLocationOpen(true)} className="rounded-xl bg-brand-bg p-3 text-[12px] font-bold">{copy.home.useGps}</button>
+                    <button onClick={() => setLocationOpen(true)} className="rounded-xl bg-brand-bg p-3 text-[12px] font-bold">{copy.home.typeLocation}</button>
+                    <button onClick={() => setLocationOpen(true)} className="rounded-xl bg-brand-bg p-3 text-[12px] font-bold">{copy.home.pickMap}</button>
+                  </div>
+                  {location ? <p className="mt-2 text-[11px] text-brand-muted">📍 {location.label}</p> : null}
+                </div>
                 <h1 className="text-[22px] font-bold leading-8">{copy.home.headline}</h1>
                 <div className="rounded-card border border-brand-border bg-white p-3 shadow-card">
                   <textarea
@@ -442,21 +437,6 @@ export default function App() {
                   ))}
                 </div>
 
-                <div className="space-y-2">
-                  <button
-                    onClick={useMyLocation}
-                    className="flex w-full items-center gap-2 rounded-2xl border border-brand-border bg-white px-4 py-3 text-[13px] font-medium shadow-card"
-                  >
-                    {copy.home.location}
-                  </button>
-                  <div className="flex flex-wrap gap-2">
-                    {copy.home.neighborhoods.map((name) => (
-                      <Chip key={name} size="sm" onClick={() => chooseNeighborhood(name)}>
-                        📍 {name}
-                      </Chip>
-                    ))}
-                  </div>
-                </div>
               </section>
             ) : (
               <>
@@ -496,12 +476,17 @@ export default function App() {
 
                 {busy ? <TypingIndicator /> : null}
 
+                {slots.query || cards.length ? (
+                  <SummaryBar slots={slots} radiusKm={radiusKm} onEdit={sendMessage} />
+                ) : null}
+
                 {cards.length ? (
                   <ProductCards
                     cards={cards}
                     more={more}
                     onSelect={selectProduct}
                     onSelectMore={selectProduct}
+                    onCompare={compareSelected}
                   />
                 ) : null}
 
@@ -520,6 +505,56 @@ export default function App() {
                 {ooc ? <OutOfCatalogCard ooc={ooc} onPickAlternative={selectProduct} /> : null}
 
                 {compare ? <CompareCard compare={compare} onPickSide={selectProduct} /> : null}
+
+                {shops.length ? (
+                  <section className="space-y-3">
+                    <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-brand-border bg-white p-3">
+                      <span className="w-full text-[12px] font-bold">{copy.home.radiusTitle}</span>
+                      {[2, 5, 10, null].map((radius) => (
+                        <Chip
+                          key={radius ?? "all"}
+                          active={radiusKm === radius}
+                          size="sm"
+                          onClick={() => setRadiusKm(radius)}
+                        >
+                          {radius === null ? copy.home.wholeCity : `${faDigits(radius)} ${copy.home.km}`}
+                        </Chip>
+                      ))}
+                    </div>
+                    {radiusKm !== null && !visibleShops.length ? (
+                      <div className="rounded-2xl border border-brand-border bg-white p-3 text-[12px] text-brand-muted">
+                        <p>{copy.home.radiusEmpty}</p>
+                        <button
+                          onClick={() => setRadiusKm(radiusKm === 2 ? 5 : radiusKm === 5 ? 10 : null)}
+                          className="mt-2 rounded-full bg-brand-red px-3 py-1.5 font-bold text-white"
+                        >
+                          {copy.home.radiusNext}
+                        </button>
+                      </div>
+                    ) : null}
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setMapOpen(true)}
+                      onKeyDown={(event) => { if (event.key === "Enter") setMapOpen(true); }}
+                      className="flex cursor-pointer items-center gap-3 rounded-2xl border border-brand-border bg-white p-2 shadow-card"
+                    >
+                      <div className="pointer-events-none h-32 w-32 shrink-0 overflow-hidden rounded-xl">
+                        <MapView
+                          shops={visibleShops}
+                          market={market}
+                          userLocation={location ?? slots.location ?? null}
+                          radiusKm={radiusKm}
+                          className="h-32 w-32"
+                        />
+                      </div>
+                      <div className="text-right">
+                        <p className="text-[13px] font-bold">🗺️ {copy.stores.map}</p>
+                        <p className="mt-1 text-[11px] text-brand-muted">{faDigits(visibleShops.length)} {copy.stores.title}</p>
+                      </div>
+                    </div>
+                  </section>
+                ) : null}
 
                 {shops.length ? (
                   <StoresSection
@@ -561,7 +596,7 @@ export default function App() {
 
           {/* bottom input */}
           {started ? (
-            <div className="sticky bottom-0 z-30 border-t border-brand-border bg-brand-bg/95 px-4 py-3 backdrop-blur">
+            <div className="sticky bottom-0 z-30 border-t border-brand-border bg-brand-bg/95 px-4 py-3 backdrop-blur xl:static xl:z-auto xl:border-t-0 xl:bg-transparent xl:backdrop-blur-none">
               <div className="flex items-end gap-2">
                 <textarea
                   value={input}
@@ -573,7 +608,7 @@ export default function App() {
                     }
                   }}
                   rows={1}
-                  placeholder="بگو چی می‌خوای…"
+                  placeholder={copy.home.placeholder}
                   className="max-h-28 flex-1 resize-none rounded-2xl border border-brand-border bg-white px-3.5 py-2.5 text-[13.5px] leading-6 outline-none focus:border-brand-red"
                 />
                 <button
@@ -589,56 +624,21 @@ export default function App() {
           ) : null}
         </div>
 
-        {/* ---------------- map pane (left side, wide screens, ~60%) ---------------- */}
-        <aside className="hidden xl:block xl:w-[60%] xl:shrink-0 xl:p-4">
-          <div className="sticky top-4 flex h-[calc(100vh-2rem)] flex-col gap-3">
-            <div className="flex items-center justify-between rounded-card border border-brand-border bg-white px-4 py-3 shadow-card">
-              <div>
-                <h2 className="text-[15px] font-bold">🗺️ نقشهٔ مغازه‌ها</h2>
-                <p className="text-[11.5px] text-brand-gray">
-                  {visibleShops.length
-                    ? `${faDigits(visibleShops.length)} فروشگاه برای کالای انتخابی`
-                    : "اول یک کالا انتخاب کن"}
-                </p>
-              </div>
-              {market ? (
-                <span className="rounded-full bg-brand-purple/10 px-2.5 py-1 text-[11px] font-bold text-brand-purple">
-                  🏬 {market.name_fa}
-                </span>
-              ) : null}
-            </div>
-
-            <div className="flex-1 overflow-hidden rounded-card border border-brand-border shadow-card">
-              <MapView
-                shops={visibleShops}
-                market={market}
-                userLocation={location ?? slots.location ?? null}
-                route={tripRoute?.polyline ?? null}
-                className="h-full w-full"
-              />
-            </div>
-
-            {visibleShops.length ? (
-              <div className="max-h-[28vh] space-y-1.5 overflow-y-auto rounded-card border border-brand-border bg-white p-3 shadow-card">
-                {visibleShops.slice(0, 12).map((shop) => (
-                  <div
-                    key={shop.shop_id}
-                    className="flex items-center justify-between gap-2 rounded-xl border border-brand-border px-3 py-2 text-[12px]"
-                  >
-                    <span className="truncate">
-                      {shop.open_status === "open" ? "🟢" : shop.open_status === "closed" ? "🔴" : "⚪️"}{" "}
-                      {shop.name}
-                    </span>
-                    <span className="shrink-0 font-bold text-brand-red">
-                      {formatPrice(shop.price)} تومان
-                    </span>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-          </div>
-        </aside>
       </div>
+
+      <LocationModal open={locationOpen} onClose={() => setLocationOpen(false)} onChoose={chooseLocation} />
+      <Sheet open={mapOpen} onClose={() => setMapOpen(false)} title={copy.stores.map} wide>
+        <div className="h-[70vh] min-h-[360px]">
+          <MapView
+            shops={visibleShops}
+            market={market}
+            userLocation={location ?? slots.location ?? null}
+            route={tripRoute?.polyline ?? null}
+            radiusKm={radiusKm}
+            className="h-full w-full"
+          />
+        </div>
+      </Sheet>
 
       <PermissionSheet
         pending={pendingApproval}

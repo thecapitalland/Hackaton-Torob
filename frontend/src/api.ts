@@ -1,4 +1,4 @@
-import type { ApiResponse, CafesNearby, GeoAddress, RouteInfo } from "./types";
+import type { ApiResponse, CafesNearby, GeoAddress, GeoSuggestion, RouteInfo } from "./types";
 
 const BASE = import.meta.env.VITE_API_BASE ?? "";
 
@@ -56,6 +56,21 @@ export const api = {
     request<ApiResponse>("/api/select_product", {
       method: "POST",
       body: JSON.stringify({ session_id: sessionId, product_id: productId, sort }),
+    }),
+
+  geoSearch: (query: string) =>
+    request<{ results: GeoSuggestion[] }>(`/api/geo/search?q=${encodeURIComponent(query)}`),
+
+  updateLocation: (sessionId: string, location: { label: string; lat: number; lon: number }) =>
+    request<ApiResponse>("/api/location", {
+      method: "POST",
+      body: JSON.stringify({ session_id: sessionId, ...location }),
+    }),
+
+  compareProducts: (sessionId: string, productIds: string[]) =>
+    request<ApiResponse>("/api/compare", {
+      method: "POST",
+      body: JSON.stringify({ session_id: sessionId, product_ids: productIds }),
     }),
 
   verify: (sessionId: string, shopIds: string[]) =>

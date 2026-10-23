@@ -7,12 +7,14 @@ export function Sheet({
   title,
   children,
   footer,
+  wide = false,
 }: {
   open: boolean;
   onClose: () => void;
   title?: ReactNode;
   children: ReactNode;
   footer?: ReactNode;
+  wide?: boolean;
 }) {
   useEffect(() => {
     if (!open) return;
@@ -40,7 +42,7 @@ export function Sheet({
         initial={{ y: "100%" }}
         animate={{ y: 0 }}
         transition={{ type: "spring", damping: 26, stiffness: 260 }}
-        className="relative w-full max-w-[420px] rounded-t-3xl bg-white p-5 shadow-sheet"
+        className={`relative w-full ${wide ? "max-w-[min(96vw,1100px)] rounded-3xl" : "max-w-[420px] rounded-t-3xl"} bg-white p-5 shadow-sheet`}
       >
         <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-brand-border" />
         {title ? (

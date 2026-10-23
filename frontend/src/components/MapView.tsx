@@ -73,6 +73,7 @@ export function MapView({
   onSelectShop,
   route,
   fallbackRoute,
+  radiusKm,
   className = "h-[320px]",
 }: {
   shops: Shop[];
@@ -88,6 +89,7 @@ export function MapView({
   route?: [number, number][] | null;
   /** straight fallback line, drawn dashed only when there is no real route */
   fallbackRoute?: [number, number][] | null;
+  radiusKm?: number | null;
   className?: string;
 }) {
   const [tileUrl, setTileUrl] = useState(OSM_URL);
@@ -269,12 +271,21 @@ export function MapView({
       ) : null}
 
       {userLocation ? (
-        <Marker
-          position={[userLocation.lat, userLocation.lon]}
-          icon={divIcon("user-marker", "")}
-        >
-          <Popup>موقعیت شما</Popup>
-        </Marker>
+        <>
+          {radiusKm != null ? (
+            <Circle
+              center={[userLocation.lat, userLocation.lon]}
+              radius={radiusKm * 1000}
+              pathOptions={{ color: "#E63946", fillColor: "#E63946", fillOpacity: 0.08 }}
+            />
+          ) : null}
+          <Marker
+            position={[userLocation.lat, userLocation.lon]}
+            icon={divIcon("user-marker", "")}
+          >
+            <Popup>موقعیت شما</Popup>
+          </Marker>
+        </>
       ) : null}
       </MapContainer>
       {!route && fallbackRoute && fallbackRoute.length >= 2 ? (
