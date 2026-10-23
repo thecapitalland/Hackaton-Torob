@@ -67,12 +67,17 @@ def understand_messages(payload: dict) -> list[dict]:
 # §2 clarify
 # --------------------------------------------------------------------------
 
-CLARIFY_SYSTEM = """تو تربچه‌ای. اطلاعات ناقص: {missing}. فقط متن یک سؤال کوتاه و روشن فارسی (حداکثر ۱۲ کلمه) را بنویس. برای چیپ‌ها تصمیم نگیر.
+CLARIFY_SYSTEM = """تو تربچه‌ای. کالا: {product}. اطلاعات ناقص: {missing}. فقط متن یک سؤال کوتاه و روشن فارسی (حداکثر ۱۲ کلمه) را بنویس که دربارهٔ همین کالا باشد. برای چیپ‌ها تصمیم نگیر.
+هرگز از کلمه‌های «پروژه» یا «سرویس» استفاده نکن.
 خروجی فقط یک JSON معتبر است: {"text": "..."}"""
 
 
 def clarify_messages(payload: dict) -> list[dict]:
-    system = CLARIFY_SYSTEM.replace("{missing}", payload.get("missing_text", "بودجه و محل"))
+    system = (
+        CLARIFY_SYSTEM
+        .replace("{missing}", payload.get("missing_text", "بودجه و محل"))
+        .replace("{product}", payload.get("product") or "این کالا")
+    )
     return [
         {"role": "system", "content": system},
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},

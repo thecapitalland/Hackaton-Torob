@@ -406,9 +406,20 @@ def search_score(keywords: Iterable[str], candidate: dict, category: str | None)
         )
         hits = sum(1 for keyword in keywords if keyword and keyword in haystack)
         base = hits / len(keywords)
-    if category and candidate.get("category_name") == category:
-        return base
-    return base * 0.6
+    score = base if category and candidate.get("category_name") == category else base * 0.6
+    keywords_text = " ".join(keywords)
+    blob = normalize(
+        " ".join(
+            [
+                str(candidate.get("persian_title") or ""),
+                str(candidate.get("category_name") or ""),
+            ]
+        )
+    )
+    part_markers = ("ترموسوئیچ", "قطعات", "لوازم جانبی", "یدکی", "قطعه", "لامپ")
+    if any(marker in blob for marker in part_markers) and not any(marker in keywords_text for marker in part_markers):
+        score *= 0.2
+    return score
 
 
 def pick_cards(candidates: list[dict], budget_max: int | None) -> list[dict]:

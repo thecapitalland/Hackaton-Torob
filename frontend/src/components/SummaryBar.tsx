@@ -22,6 +22,12 @@ export function SummaryBar({
   ];
 
   const slotNames = ["product", "budget", "location", "radius"] as const;
+  const placeholders = [
+    copy.summary.placeholders.product,
+    copy.summary.placeholders.budget,
+    copy.summary.placeholders.location,
+    copy.summary.placeholders.radius,
+  ];
   const beginEdit = (key: string) => {
     setEditing(key);
     setValue("");
@@ -54,7 +60,7 @@ export function SummaryBar({
             value={value}
             onChange={(event) => setValue(event.target.value)}
             onKeyDown={(event) => { if (event.key === "Enter") submit(); }}
-            placeholder={copy.summary.editHint}
+            placeholder={placeholders[Number(editing)] ?? copy.summary.editHint}
             className="min-w-0 flex-1 rounded-lg border border-brand-border px-2.5 py-2 text-[12px] outline-none focus:border-brand-red"
           />
           <button onClick={submit} className="rounded-lg bg-brand-red px-3 text-[12px] font-bold text-white">{copy.home.cta}</button>

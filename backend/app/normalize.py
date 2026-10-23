@@ -63,6 +63,11 @@ def fa_digits(text: str) -> str:
     return "".join(FA_DIGITS[int(c)] if c.isdigit() else c for c in text)
 
 
+def collapse_whitespace(text: str | None) -> str:
+    """Join newlines and repeated spaces so a card title stays one line."""
+    return " ".join(str(text or "").split())
+
+
 def normalize(text: str | None) -> str:
     """Fold text for searching: digits -> ASCII, letters folded, ZWNJ removed."""
     if not text:

@@ -13,6 +13,7 @@ from .normalize import (
     BRAND_ALIASES,
     CATEGORY_SYNONYMS,
     NEIGHBORHOODS,
+    collapse_whitespace,
     fa_digits,
     geocode_neighbourhood,
     normalize,
@@ -431,6 +432,33 @@ def core_noun_aliases(noun: str | None) -> tuple[str, ...]:
     return CORE_NOUN_ALIASES.get(noun or "", (noun,) if noun else ())
 
 
+FRIDGE_CATEGORIES: tuple[str, ...] = (
+    "یخچال فریزر بالاپایین",
+    "یخچال فریزر ساید بای ساید",
+    "یخچال فریزر دوقلو",
+    "یخچال فریزر در فرانسوی",
+    "یخچال، فریزر و تاپینگ فروشگاهی",
+)
+PART_MARKERS: tuple[str, ...] = ("ترموسوئیچ", "قطعات", "لوازم جانبی", "یدکی", "قطعه", "لامپ")
+
+
+def is_accessory_request(text: str) -> bool:
+    """True when the user asks for a part rather than the main product."""
+    normalized = normalize(text)
+    if any(marker in normalized for marker in PART_MARKERS):
+        return True
+    return "درب" in normalized and "یخچال" in normalized and "گوشی" not in normalized
+
+
+def fridge_categories(known_categories: list[str] | None = None) -> list[str]:
+    names: list[str] = []
+    for name in FRIDGE_CATEGORIES:
+        accepted = _known_category(name, known_categories)
+        if accepted:
+            names.append(accepted)
+    return names
+
+
 def category_for_core_noun(
     noun: str | None,
     text: str,
@@ -444,8 +472,16 @@ def category_for_core_noun(
         return _known_category("شارژر لپ تاپ", known_categories)
     if noun == "شارژر" and "گوشی" in normalized:
         return _known_category("شارژر گوشی", known_categories)
-    if noun in {"قاب", "یخچال"}:
-        return None
+    if noun == "قاب":
+        return _known_category("قاب، شاسی و درب گوشی", known_categories)
+    if noun == "یخچال":
+        if any(token in normalized for token in ("یخدان", "مسافر", "سفری", "پرتابل", "portable")):
+            return _known_category("یخچال مسافرتی", known_categories)
+        if is_accessory_request(text):
+            return _known_category("قطعات و لوازم جانبی یخچال و فریزر", known_categories)
+        if "ساید" in normalized:
+            return _known_category("یخچال فریزر ساید بای ساید", known_categories)
+        return _known_category("یخچال فریزر بالاپایین", known_categories)
     mapped = {
         "هدفون": "هدفون، هدست و هندزفری",
         "گوشی": "گوشی موبایل",
@@ -491,16 +527,23 @@ RADIUS_RE = re.compile(r"(?<!\d)(\d{1,2})\s*(?:کیلومتر|km)\b", re.IGNOREC
 RADIUS_VALUES = {2, 5, 10}
 
 
-def detect_radius(text: str) -> tuple[bool, int | None]:
-    """Return (was-mentioned, radius); None radius explicitly means all Tehran."""
+def detect_radius(text: str, *, bare: bool = False) -> tuple[bool, int | None]:
+    """Return (was-mentioned, radius); None radius explicitly means all Tehran.
+
+    ``bare`` accepts a summary-chip value of 2, 5, or 10 with no unit.
+    """
     normalized = normalize(text)
     if any(phrase in normalized for phrase in ("کل تهران", "همه تهران", "تمام تهران")):
         return True, None
     match = RADIUS_RE.search(normalized)
-    if not match:
-        return False, None
-    value = int(match.group(1))
-    return (True, value) if value in RADIUS_VALUES else (False, None)
+    if match:
+        value = int(match.group(1))
+        return (True, value) if value in RADIUS_VALUES else (False, None)
+    if bare and normalized.isdigit():
+        value = int(normalized)
+        if value in RADIUS_VALUES:
+            return True, value
+    return False, None
 
 
 def detect_location(text: str) -> dict | None:
@@ -926,6 +969,8 @@ def rule_intent(
             query_terms.append(keyword)
     if brand and normalize(brand) not in {normalize(term) for term in query_terms}:
         query_terms.append(brand)
+    if core == "قاب" and "گوشی" in normalize(text) and not any(normalize(term) == "گوشی" for term in query_terms):
+        query_terms.insert(1 if query_terms else 0, "گوشی")
     query = dedupe_query_text(" ".join(query_terms).strip() or normalize(text)[:80])
 
     if not has_product and not query_terms and not (budget_max or budget_min or location):
@@ -952,7 +997,7 @@ def chitchat_reply(text: str, cards: list | None = None) -> str:
     normalized = normalize(text)
     shown = cards or []
     if shown and is_card_followup(text):
-        title = str(shown[0].get("title") or shown[0].get("persian_title") or "کارت اول")
+        title = collapse_whitespace(shown[0].get("title") or shown[0].get("persian_title") or "کارت اول")
         if "کدوم" in normalized:
             return f"از همین کارت‌ها، «{title}» انتخاب بهتر است."
         return f"منظورت همین اولی است: «{title}»."
@@ -961,6 +1006,8 @@ def chitchat_reply(text: str, cards: list | None = None) -> str:
     if any(token in normalized for token in ("مرسی", "ممنون")):
         return "خواهش می‌کنم. اگر بخواهی روی همین نتایج دقیق‌تر می‌گردم."
     if any(token in normalized for token in ("سلام", "درود", "صبح بخیر", "عصر بخیر")):
+        if shown:
+            return "سلام! اگر بخواهی، روی همین نتایج دقیق‌تر می‌گردم."
         return "سلام! چه کالایی را برای خرید حضوری جست‌وجو می‌کنید؟"
     return "برای شروع، نام کالا یا نیازتان را بنویسید."
 
@@ -983,12 +1030,47 @@ CLARIFY_QUESTIONS = {
 }
 
 
-def clarify_fallback(missing: list[str]) -> dict:
-    """Deterministic clarifying question (always ends with «مهم نیست»)."""
+def clarify_kind(missing: list[str]) -> str:
     for kind in ("budget", "location", "payment"):
         if kind in missing:
-            return dict(CLARIFY_QUESTIONS[kind])
-    return dict(CLARIFY_QUESTIONS["budget"])
+            return kind
+    return "budget"
+
+
+def clarify_product(slots: dict | None, text: str = "") -> str:
+    """Short product name used inside a fixed clarify question."""
+    slots = slots or {}
+    query = str(slots.get("query") or "").strip()
+    if query:
+        return query
+    keywords = [str(item).strip() for item in (slots.get("keywords") or []) if str(item).strip()]
+    if keywords:
+        return " ".join(keywords[:3])
+    category = str(slots.get("category") or "").strip()
+    if category:
+        return category
+    return core_noun(text, None) or "این کالا"
+
+
+def question_text_rejected(text: str) -> bool:
+    """LLM wording that drifted off a shopping question."""
+    normalized = normalize(text)
+    return "پروژه" in normalized or "سرویس" in normalized
+
+
+def clarify_fallback(missing: list[str], product: str | None = None) -> dict:
+    """Deterministic clarifying question (always ends with «مهم نیست»).
+
+    Budget and payment stay on these templates. The model must not rewrite them.
+    """
+    kind = clarify_kind(missing)
+    question = dict(CLARIFY_QUESTIONS[kind])
+    label = (product or "").strip() or "این کالا"
+    if kind == "budget":
+        question["text"] = f"برای {label} تا چه قیمتی در نظر داری؟"
+    elif kind == "payment":
+        question["text"] = f"برای {label} پرداخت قسطی یا ترب‌پی مهم است؟"
+    return question
 
 
 # --------------------------------------------------------------------------

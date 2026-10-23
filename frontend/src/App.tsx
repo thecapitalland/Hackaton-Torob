@@ -125,6 +125,7 @@ export default function App() {
     if (response.slots) {
       setSlots(response.slots);
       if (response.slots.location) setLocation(response.slots.location);
+      if ("radius_km" in response.slots) setRadiusKm(response.slots.radius_km ?? null);
     }
     setPending(response.pending ?? null);
     if (response.cards) setCards(response.cards);

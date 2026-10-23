@@ -39,6 +39,7 @@ from .normalize import (
     NEIGHBORHOODS,
     SEARCH_ALIASES,
     fa_digits,
+    collapse_whitespace,
     geocode_neighbourhood,
     normalize,
     tokenize,
@@ -199,7 +200,9 @@ def _decision_from_slot_edit(edit: dict) -> dict:
             },
         }
     if slot == "radius":
-        _mentioned, radius = rules.detect_radius(text)
+        mentioned, radius = rules.detect_radius(text, bare=True)
+        if not mentioned:
+            return {"source": "rule", "intent": {"action": "refine", "confidence": 1.0}}
         return {
             "source": "rule",
             "intent": {"action": "change_radius", "radius_km": radius, "confidence": 1.0},
@@ -493,15 +496,23 @@ def understand(state: AgentState) -> dict:
             for key, value in (current or {}).items()
             if key not in ("query", "keywords", "category", "compare")
         }
+    edit_slot = str((state.get("slot_edit") or {}).get("slot") or "")
+    incoming_category = extracted.get("category") or rules.detect_category(text, _known_categories())
+    previous_category = (current or {}).get("category")
+    category_changed = (
+        bool(previous_category)
+        and bool(incoming_category)
+        and normalize(str(previous_category)) != normalize(str(incoming_category))
+    )
     if (
         decision_action == "new_search"
         and not state.get("last_question")
         and rules.parse_budget(text) == (None, None)
         and (current.get("budget_max") is not None or current.get("budget_min") is not None)
+        and category_changed
     ):
-        # A new product/brand search does not silently inherit a stale price
-        # ceiling from the previous product. Treat that old filter as skipped
-        # rather than immediately asking the user to repeat a budget.
+        # A different product category does not silently inherit a stale price
+        # ceiling. The same category, including «کفش نایک» after sneakers, keeps it.
         current = {
             key: value
             for key, value in current.items()
@@ -513,7 +524,7 @@ def understand(state: AgentState) -> dict:
     # A newly typed budget replaces the previous budget constraint. In
     # particular, «بالای ۱۰ میلیون هم بگرد» must not keep an older maximum
     # that would make the range impossible.
-    turn_budget_max, turn_budget_min = rules.parse_budget(text, budget_context=bool(state.get("slot_edit")))
+    turn_budget_max, turn_budget_min = rules.parse_budget(text, budget_context=edit_slot == "budget")
     if rules.is_cheaper_request(text) and slots.get("budget_max") and turn_budget_max is None:
         slots["budget_max"] = max(10_000, int(int(slots["budget_max"]) * 0.8))
         slots["budget_skipped"] = False
@@ -540,7 +551,6 @@ def understand(state: AgentState) -> dict:
 
     # Update #1: a GPS position from the client fills an empty location slot,
     # but an explicit text location above always wins.
-    edit_slot = str((state.get("slot_edit") or {}).get("slot") or "")
     user_location = state.get("user_location") or {}
     incoming_label = str(user_location.get("label") or "").strip()
     has_real_label = bool(incoming_label) and incoming_label != "موقعیت فعلی شما"
@@ -600,12 +610,11 @@ def understand(state: AgentState) -> dict:
         # current turn, if any, is the only one that may constrain it.
         slots["category"] = extracted.get("category")
         slots["brand"] = extracted.get("brand")
-        if decision_data:
-            slots["accessory_request"] = bool(decision_data.get("accessory_request"))
     elif not slots.get("query") and not is_compare_turn and not budget_only:
         slots["query"] = text
     if slots.get("query"):
         slots["query"] = rules.dedupe_query_text(str(slots["query"]))
+    slots["accessory_request"] = bool(decision_data.get("accessory_request")) or rules.is_accessory_request(text)
     if slots.get("category") and slots["category"] in ACCESSORY_CATEGORIES:
         slots["category"] = None
     slots["keywords"] = _clean_keywords(slots.get("keywords"), slots.get("location"))
@@ -659,9 +668,18 @@ def understand(state: AgentState) -> dict:
 # --------------------------------------------------------------------------
 
 
-def _llm_clarify(missing: list[str]) -> dict:
-    fallback = rules.clarify_fallback(missing)
-    payload = {"missing": missing, "missing_text": " و ".join(missing)}
+def _llm_clarify(missing: list[str], product: str | None = None) -> dict:
+    label = (product or "").strip() or "این کالا"
+    fallback = rules.clarify_fallback(missing, label)
+    # Budget and payment are fixed templates. The model must not rewrite them
+    # into an unrelated «پروژه» or «سرویس» question.
+    if rules.clarify_kind(missing) in {"budget", "payment"}:
+        return fallback
+    payload = {
+        "missing": missing,
+        "missing_text": " و ".join(missing),
+        "product": label,
+    }
     raw = _chat_json(
         "clarify", prompts.clarify_messages(payload),
         response_validator=ClarifyOut.model_validate,
@@ -672,7 +690,9 @@ def _llm_clarify(missing: list[str]) -> dict:
         parsed = ClarifyOut(**raw)
     except ValidationError:
         return fallback
-    text = parsed.text.strip() or fallback["text"]
+    text = parsed.text.strip()
+    if not text or rules.question_text_rejected(text):
+        return fallback
     return {"text": text, "chips": fallback["chips"]}
 
 
@@ -723,7 +743,8 @@ def _apply_clarify_answer(slot: str, answer: str, slots: dict) -> dict:
 def clarify(state: AgentState) -> dict:
     started = time.time()
     missing = state.get("missing") or ["budget"]
-    payload = _llm_clarify(missing)
+    product = rules.clarify_product(state.get("slots") or {}, state.get("text") or "")
+    payload = _llm_clarify(missing, product)
     question = interrupt(
         {
             "type": "question",
@@ -816,6 +837,11 @@ def _product_matches_relevance(
             blob = normalize(f"{title} {category_name}")
             if any(marker in blob for marker in ("یخدان", "کلمن", "مسافرت", "سفری", "پرتابل", "portable")):
                 return False
+            if not allow_accessories and (
+                any(marker in blob for marker in rules.PART_MARKERS)
+                or ("درب" in tokenize(title) and "درب" not in normalize(query))
+            ):
+                return False
 
     title_tokens = set(tokenize(title))
     if not allow_accessories:
@@ -879,10 +905,16 @@ def _search_relevant_products(
         )
     if core == "قاب":
         brand_word = brand_groups[0][0] if brand_groups else None
+        case_category = rules.category_for_core_noun("قاب", query, _known_categories())
+        attempts = []
         for alias in reversed(rules.core_noun_aliases("قاب")):
             words = [alias, brand_word] if brand_word else [alias]
-            attempts.insert(0, (words, None, 1, "all"))
-    attempts.extend(
+            attempts.append((words, case_category, 1, "all"))
+    elif core == "یخچال" and not allow_accessories:
+        for name in reversed(rules.fridge_categories(_known_categories())):
+            attempts.insert(0, (["یخچال"], name, 1, "all"))
+    if core != "قاب":
+        attempts.extend(
         [
             (keywords, selected_category, 1, "all"),
             (keywords, selected_category, 1, "any"),
@@ -893,46 +925,53 @@ def _search_relevant_products(
             (keywords, None, 1, "any"),
             ([], None, 1, "all"),
         ]
-    )
+        )
 
     merged: list[dict] = []
     seen: dict[str, int] = {}
-    for words, cat, min_shops, mode in attempts:
-        variants = _keyword_variants(words)
-        for variant in variants:
-            rows = catalog.search_products(
-                variant,
-                cat,
-                budget_max,
-                budget_min,
-                limit=max(limit, 200) if not cat and core else limit,
-                min_shops=min_shops,
-                match_mode=mode,
-            )
-            for item in rows:
-                product_id = str(item.get("product_id") or "")
-                if not product_id:
-                    continue
-                if not _product_matches_relevance(
-                    item, query, cat, core, brand_groups, allow_accessories
-                ):
-                    continue
-                # «بالای N» is a minimum price, not a range-overlap hint:
-                # do not show a product whose visible starting price is below N.
-                if budget_min is not None and int(item.get("min_price") or 0) < budget_min:
-                    continue
-                title_key = _normalized_title_key(item)
-                old_index = seen.get(title_key)
-                if old_index is None:
-                    seen[title_key] = len(merged)
-                    merged.append(item)
-                else:
-                    previous = merged[old_index]
-                    if int(item.get("min_price") or 0) < int(previous.get("min_price") or 0):
-                        merged[old_index] = item
-        merged.sort(key=lambda item: (-int(item.get("n_shops") or 0), int(item.get("min_price") or 0)))
-        if len(merged) >= 3:
-            break
+
+    def absorb(price_ceiling: int | None) -> None:
+        for words, cat, min_shops, mode in attempts:
+            variants = _keyword_variants(words)
+            for variant in variants:
+                rows = catalog.search_products(
+                    variant,
+                    cat,
+                    price_ceiling,
+                    budget_min,
+                    limit=max(limit, 200) if not cat and core else limit,
+                    min_shops=min_shops,
+                    match_mode=mode,
+                )
+                for item in rows:
+                    product_id = str(item.get("product_id") or "")
+                    if not product_id:
+                        continue
+                    if not _product_matches_relevance(
+                        item, query, cat, core, brand_groups, allow_accessories
+                    ):
+                        continue
+                    # «بالای N» is a minimum price, not a range-overlap hint:
+                    # do not show a product whose visible starting price is below N.
+                    if budget_min is not None and int(item.get("min_price") or 0) < budget_min:
+                        continue
+                    title_key = _normalized_title_key(item)
+                    old_index = seen.get(title_key)
+                    if old_index is None:
+                        seen[title_key] = len(merged)
+                        merged.append(item)
+                    else:
+                        previous = merged[old_index]
+                        if int(item.get("min_price") or 0) < int(previous.get("min_price") or 0):
+                            merged[old_index] = item
+            merged.sort(key=lambda item: (-int(item.get("n_shops") or 0), int(item.get("min_price") or 0)))
+            if len(merged) >= 3:
+                return
+
+    absorb(budget_max)
+    # A ceiling that only parts or nothing can meet must not hide the product.
+    if len(merged) < 3 and budget_max and core and not allow_accessories:
+        absorb(None)
     return merged[:limit], selected_category
 
 
@@ -1079,7 +1118,7 @@ def recommend(state: AgentState) -> dict:
             {
                 "kind": item.get("kind", "best"),
                 "product_id": product["product_id"],
-                "title": product.get("persian_title") or "",
+                "title": collapse_whitespace(product.get("persian_title")),
                 "brand": product.get("brand_name") or "",
                 "image": catalog.first_image(product),
                 "min_price": int(product.get("min_price") or 0),
@@ -1093,7 +1132,10 @@ def recommend(state: AgentState) -> dict:
 
     specialty = get_specialty_market(slots.get("category"), slots.get("location"))
 
-    llm_out = _llm_recommend(cards, specialty)
+    action = str(((state.get("decision") or {}).get("intent") or {}).get("action") or "")
+    # A pure refine already has the product. Skip the recommend model so the
+    # turn stays inside the latency cap.
+    llm_out = {} if action in {"refine", "change_radius", "change_location"} else _llm_recommend(cards, specialty)
     llm_cards = {
         str(item.get("product_id")): item
         for item in (llm_out.get("cards") or [])
@@ -1128,7 +1170,7 @@ def recommend(state: AgentState) -> dict:
         more.append(
             {
                 "product_id": candidate["product_id"],
-                "title": candidate.get("persian_title"),
+                "title": collapse_whitespace(candidate.get("persian_title")),
                 "brand": candidate.get("brand_name"),
                 "image": catalog.first_image(candidate),
                 "min_price": int(candidate.get("min_price") or 0),

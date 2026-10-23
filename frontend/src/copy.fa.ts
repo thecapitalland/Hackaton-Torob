@@ -47,6 +47,12 @@ export const copy = {
     product: "محصول",
     budget: "بودجه",
     location: "محله",
+    placeholders: {
+      product: "نام کالا",
+      budget: "مثلاً ۷ میلیون",
+      location: "نام محله",
+      radius: "۲، ۵، ۱۰ کیلومتر یا کل تهران",
+    },
   },
 
   decision: {
@@ -84,7 +90,7 @@ export const copy = {
 
   market: {
     title: "🏬 بورس این کالا در تهران",
-    why: "چرا اونجا؟",
+    why: "چرا این بازار؟",
     shopsInCity: "فروشگاه از",
     shopsCity: "فروشگاه شهر در داده‌های ترب",
     median: "میانهٔ قیمت",
