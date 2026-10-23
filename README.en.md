@@ -83,10 +83,40 @@ Reproducibility notes:
 - `build_markets.py` **overwrites** the committed `data/markets.json`; edit the curated
   `MARKET_DEFINITIONS` / `EXTERNAL_MARKETS` in the script, not just the JSON file.
 
-To enable the LLM, set `BOXAPI_API_KEY` and `LLM_MODE=on`, then run
-`python backend/scripts/smoke_llm.py`. The smoke script contacts only the configured `BOXAPI_BASE_URL`;
-it never sends credentials to alternate hosts. A missing Neshan key silently falls back
-(approximate distance / local cafe list) — the app never breaks.
+### GapGPT (default provider)
+
+Set `BOXAPI_API_KEY` in `.env`; the default compatible endpoint is `https://api.gapgpt.app/v1`.
+```dotenv
+BOXAPI_BASE_URL=https://api.gapgpt.app/v1
+LLM_MODE=on
+LLM_MODEL=deepseek-v4.1-flash
+LLM_MODEL_FALLBACK=gpt-4.1-mini
+LLM_TIMEOUT=6
+LLM_STRUCTURED=auto
+LLM_COST_LOG=1
+DECIDER_MODEL=typesafe/jev-1.14
+DECIDER_TIMEOUT=4
+MESSAGE_BUDGET_S=8
+```
+The example configuration uses `deepseek-v4.1-flash` with `gpt-4.1-mini` fallback and the
+action-only `typesafe/jev-1.14` decider. Jev proposes an action; deterministic rules/catalog
+guard category, brand, budget, neighbourhood and radius. Decisions are Pydantic-validated and
+fall back to rules on timeout, 429 or invalid output. One message shares an 8-second budget
+and makes at most two model requests.
+
+Example GapGPT prices (USD per million input/output tokens): DeepSeek v4.1 Flash `$0.15/$0.60`,
+GPT-4.1 Mini `$0.40/$1.60`, Jev `$0.042/$0`. Redacted `llm_call` records include usage and cost;
+`GET /api/debug/llm-stats` is available only when `DEBUG=1`.
+`LLM_STRUCTURED=auto` detects JSON schema/object support at runtime. `python backend/scripts/smoke_llm.py`
+contacts only the configured `BOXAPI_BASE_URL`; add `--jev` to smoke `/systemone` separately. It never
+sends credentials to alternate hosts. With no key or `LLM_MODE=off`, deterministic rules keep the app working.
+Pricing/wallet details were checked on 2026-10-23; the published minimum top-up was 5,000 toman and the displayed USDT rate was about 273,564 toman.
+
+Chat decisions use a typed eight-action union (`new_search`, `refine`, `change_radius`, `change_location`,
+`compare`, `haggle`, `ooc`, `chitchat`); rules both provide fallback and guard category/brand/budget/location.
+Regenerate the shared schemas and TypeScript types with `python backend/scripts/export_schemas.py` and
+`cd frontend && npm run gen:types`. OOC uses a fixed honest sentence and only whitelisted Tehran-market routes.
+A missing Neshan key silently falls back (approximate distance / local cafe list).
 
 ### Optional OpenRouter configuration
 

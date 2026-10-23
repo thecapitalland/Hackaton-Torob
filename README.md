@@ -171,10 +171,49 @@ PYTHONIOENCODING=utf-8 LLM_MODE=off DEMO_MODE=1 DEMO_NOW=2026-10-22T15:00:00+03:
 - `build_markets.py` فایل `data/markets.json` را **بازنویسی** می‌کند؛ تغییرات دستی در آن (بازارهای بیرونی،
   ساعت‌های کاری) باید در `MARKET_DEFINITIONS` / `EXTERNAL_MARKETS` داخل اسکریپت اعمال شود، نه فقط در JSON.
 
-برای فعال‌کردن LLM، کلید provider را در `BOXAPI_API_KEY` قرار بده، `LLM_MODE=on` کن و
-`python backend/scripts/smoke_llm.py` را اجرا کن. این smoke فقط `BOXAPI_BASE_URL` پیکربندی‌شده را صدا می‌زند؛
-کلید به میزبان دیگری ارسال نمی‌شود. نبودِ کلید نشان باعث
-fallback کامل (فاصلهٔ تقریبی/کافهٔ محلی) می‌شود — اپ هرگز نمی‌شکند.
+#### GapGPT (provider پیش‌فرض)
+
+برای فعال‌سازی، کلید GapGPT را در `BOXAPI_API_KEY` قرار بده. مقدارهای `.env.example`:
+
+```dotenv
+BOXAPI_BASE_URL=https://api.gapgpt.app/v1
+LLM_MODE=on
+LLM_MODEL=deepseek-v4.1-flash
+LLM_MODEL_FALLBACK=gpt-4.1-mini
+LLM_TIMEOUT=6
+LLM_STRUCTURED=auto
+LLM_COST_LOG=1
+LLM_ROUTER_TIMEOUT=5
+LLM_ROUTER_MIN_CONFIDENCE=0.6
+LLM_STRUCTURED=auto
+LLM_COST_LOG=1
+LLM_ROUTER_BACKEND=jev
+DECIDER_MODEL=typesafe/jev-1.14
+DECIDER_TIMEOUT=4
+DECIDER_MIN_CONF=0.7
+MESSAGE_BUDGET_S=8
+```
+
+روتر Jev فقط action را پیشنهاد می‌دهد؛ قواعد و کاتالوگ دسته، برند، بودجه، محله و شعاع را کنترل می‌کنند.
+همهٔ خروجی‌ها validate می‌شوند و در timeout/429 به مسیر قواعد برمی‌گردند. در هر پیام حداکثر دو فراخوانی
+در deadline مشترک انجام می‌شود. قیمت نمونهٔ GapGPT (دلار/یک‌میلیون توکن، ورودی/خروجی):
+`deepseek-v4.1-flash` حدود `0.15/0.60`، `gpt-4.1-mini` برابر `0.40/1.60`، و `typesafe/jev-1.14` برابر `0.042/0`.
+هزینه و token usage در لاگ `llm_call` ثبت می‌شوند؛ `GET /api/debug/llm-stats` فقط با `DEBUG=1` فعال است.
+Jev از endpoint اختصاصی `/systemone` استفاده می‌کند (نه tool calling). `LLM_STRUCTURED=auto` قابلیت JSON schema/object را در runtime با cache پروسه‌ای تشخیص می‌دهد.
+`python backend/scripts/smoke_llm.py` فقط میزبان `BOXAPI_BASE_URL` تنظیم‌شده را صدا می‌زند؛ `--jev` نیز smoke جداگانهٔ Jev را اجرا می‌کند. کلید به میزبان دیگری ارسال نمی‌شود.
+این قیمت‌ها و اطلاعات کیف پول در ۱۴۰۵/۰۸/۰۱ بررسی شدند؛ حداقل شارژ اعلام‌شده ۵٬۰۰۰ تومان است و نرخ نمایش‌داده‌شدهٔ USDT حدود ۲۷۳٬۵۶۴ تومان بود.
+
+تصمیم‌های چت یک union تایپ‌سیف هشت‌اکشنی دارند (`new_search`, `refine`, `change_radius`, `change_location`, `compare`, `haggle`, `ooc`, `chitchat`). قواعد محلی fallback هستند و همزمان guardrail دسته، برند، بودجه و محله‌اند. برای همگام‌سازی قراردادها:
+
+```bash
+python backend/scripts/export_schemas.py
+cd frontend && npm run gen:types
+```
+
+هزینهٔ هر درخواست با token usage در لاگ ساختاریافته می‌آید؛ endpoint آمار فقط با `DEBUG=1` روشن است. راهنمای OOC نیز پیام ثابت و صادقانه دارد و بازارها را از whitelist تهران resolve می‌کند.
+
+اگر کلید خالی باشد یا `LLM_MODE=off` باشد، اپ کاملاً با قواعد قطعی اجرا می‌شود. نبودِ کلید نشان نیز باعث
+fallback کامل (فاصلهٔ تقریبی/کافهٔ محلی) می‌شود.
 
 #### استفاده از OpenRouter (اختیاری)
 
