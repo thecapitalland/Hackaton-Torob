@@ -10,7 +10,7 @@ export function SummaryBar({
 }: {
   slots: Slots;
   radiusKm: number | null;
-  onEdit: (message: string) => void;
+  onEdit: (slot: "product" | "budget" | "location" | "radius", message: string) => void;
 }) {
   const [editing, setEditing] = useState<string | null>(null);
   const [value, setValue] = useState("");
@@ -21,13 +21,15 @@ export function SummaryBar({
     radiusKm === null ? copy.home.wholeCity : `${radiusKm} ${copy.home.km}`,
   ];
 
+  const slotNames = ["product", "budget", "location", "radius"] as const;
   const beginEdit = (key: string) => {
     setEditing(key);
     setValue("");
   };
   const submit = () => {
-    if (!value.trim()) return;
-    onEdit(value.trim());
+    if (!value.trim() || editing === null) return;
+    const slot = slotNames[Number(editing)] ?? "product";
+    onEdit(slot, value.trim());
     setEditing(null);
     setValue("");
   };

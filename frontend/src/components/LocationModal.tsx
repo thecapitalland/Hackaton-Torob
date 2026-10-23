@@ -92,7 +92,15 @@ export function LocationModal({
   };
 
   const selectMapPoint = (lat: number, lon: number) => {
+    setError(null);
     setSelected({ label: copy.home.selectedMapPoint, lat, lon });
+    api.geoReverse(lat, lon)
+      .then((address) => {
+        const hood = address.neighbourhood || address.label;
+        const label = address.label || (hood ? `نزدیک ${hood}` : copy.home.selectedMapPoint);
+        setSelected({ label, lat, lon });
+      })
+      .catch(() => undefined);
   };
 
   useEffect(() => {
@@ -116,7 +124,10 @@ export function LocationModal({
         <input
           id="hood-search"
           value={query}
-          onChange={(event) => setQuery(event.target.value)}
+          onChange={(event) => {
+            setQuery(event.target.value);
+            setError(null);
+          }}
           placeholder={copy.home.locationPlaceholder}
           className="w-full rounded-xl border border-brand-border px-3 py-2.5 text-[13px] outline-none focus:border-brand-red"
         />

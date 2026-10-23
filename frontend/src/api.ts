@@ -40,10 +40,15 @@ export const api = {
 
   createSession: () => request<{ session_id: string }>("/api/session", { method: "POST" }),
 
-  chat: (sessionId: string, text: string, location?: { lat: number; lon: number }) =>
+  chat: (
+    sessionId: string,
+    text: string,
+    location?: { lat: number; lon: number; label?: string },
+    edit?: { slot: "product" | "budget" | "location" | "radius"; text: string },
+  ) =>
     request<ApiResponse>("/api/chat", {
       method: "POST",
-      body: JSON.stringify({ session_id: sessionId, text, location }),
+      body: JSON.stringify({ session_id: sessionId, text, location, edit }),
     }),
 
   resume: (sessionId: string, value: unknown) =>

@@ -119,6 +119,7 @@ class AgentState(TypedDict, total=False):
     # per-request input fields (overwritten on every invocation)
     action: Action
     text: str
+    slot_edit: Optional[dict]
     product_id: Optional[str]
     shop_ids: list[str]
     sort: str

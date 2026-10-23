@@ -316,14 +316,19 @@ for _entry in TEHRAN_NEIGHBOURHOODS:
         NEIGHBORHOODS.setdefault(_label, _coords)
 
 
+def _squash(text: str) -> str:
+    return normalize(text).replace(" ", "")
+
+
 def geocode_neighbourhood(query: str | None) -> dict | None:
     """Resolve a Tehran neighbourhood name or alias to its canonical point."""
     normalized = normalize(query or "")
+    squashed = _squash(normalized)
     if not normalized:
         return None
     for entry in TEHRAN_NEIGHBOURHOODS:
         labels = (entry["name_fa"], *entry["aliases"])
-        if any(normalize(label) == normalized for label in labels):
+        if any(normalize(label) == normalized or _squash(label) == squashed for label in labels):
             return {
                 "label": entry["name_fa"],
                 "lat": entry["lat"],
@@ -334,8 +339,8 @@ def geocode_neighbourhood(query: str | None) -> dict | None:
     for entry in TEHRAN_NEIGHBOURHOODS:
         for label in (entry["name_fa"], *entry["aliases"]):
             key = normalize(label)
-            if len(key) >= 3 and key in normalized:
-                matches.append((len(key), entry))
+            if len(key) >= 3 and (key in normalized or (len(_squash(label)) >= 5 and _squash(label) in squashed)):
+                matches.append((len(_squash(label)), entry))
     if not matches:
         return None
     entry = max(matches, key=lambda item: item[0])[1]
@@ -348,24 +353,45 @@ def geocode_neighbourhood(query: str | None) -> dict | None:
 
 
 def search_neighbourhoods(query: str, limit: int = 8) -> list[dict]:
-    """Deterministic local suggestions for a typed Tehran neighbourhood."""
+    """Deterministic local suggestions for a typed Tehran neighbourhood.
+
+    Exact names rank first, so «ونک» is offered before «پونک».
+    """
     normalized = normalize(query)
-    if len(normalized) < 2:
+    squashed = _squash(normalized)
+    if len(squashed) < 2:
         return []
-    found: list[dict] = []
+    found: list[tuple[int, str, dict]] = []
     seen: set[str] = set()
     for entry in TEHRAN_NEIGHBOURHOODS:
         labels = (entry["name_fa"], *entry["aliases"])
-        if not any(normalized in normalize(label) or normalize(label) in normalized for label in labels):
+        best_rank: int | None = None
+        for label in labels:
+            key = normalize(label)
+            flat = _squash(label)
+            if not key:
+                continue
+            if key == normalized or flat == squashed:
+                rank = 0
+            elif key.startswith(normalized) or flat.startswith(squashed):
+                rank = 1
+            elif normalized in key or (len(squashed) >= 3 and squashed in flat):
+                rank = 2
+            else:
+                continue
+            if best_rank is None or rank < best_rank:
+                best_rank = rank
+        if best_rank is None:
             continue
-        key = normalize(entry["name_fa"])
-        if key in seen:
+        identity = normalize(entry["name_fa"])
+        if identity in seen:
             continue
-        seen.add(key)
-        found.append({
+        seen.add(identity)
+        found.append((best_rank, identity, {
             "name_fa": entry["name_fa"],
             "lat": entry["lat"],
             "lon": entry["lon"],
             "source": "fallback",
-        })
-    return found[: max(0, limit)]
+        }))
+    found.sort(key=lambda item: (item[0], item[1]))
+    return [item[2] for item in found[: max(0, limit)]]

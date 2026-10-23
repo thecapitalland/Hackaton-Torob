@@ -19,16 +19,12 @@ export function OutOfCatalogCard({
     >
       <div className="rounded-2xl bg-brand-bg p-3">
         <h3 className="text-[14px] font-bold text-brand-muted">
-          🔍 {copy.ooc.header}
+          🔍 {ooc.alternatives?.length ? copy.ooc.closest : copy.ooc.header}
         </h3>
-        <p className="mt-1 text-[13px] text-brand-muted">
-          «{ooc.query}» {copy.ooc.notFound}
-        </p>
       </div>
 
       {ooc.alternatives?.length ? (
         <div>
-          <h4 className="mb-2 text-[13.5px] font-bold">{copy.ooc.closest}</h4>
           <div className="mb-2 flex flex-wrap gap-2">
             {[...new Map(ooc.alternatives.filter((item) => item.category_name).map((item) => [item.category_name!, item])).values()].map((item) => (
               <button

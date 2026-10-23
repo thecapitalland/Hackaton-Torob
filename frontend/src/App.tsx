@@ -37,6 +37,22 @@ import { LocationModal } from "./components/LocationModal";
 import { SummaryBar } from "./components/SummaryBar";
 import { filterByRadius } from "./lib/shop";
 
+function composerPlaceholder(
+  pending: { id?: string; missing?: string[] } | null,
+  phase: string,
+  hasCards: boolean,
+  hasShops: boolean,
+) {
+  const slot = pending?.id?.startsWith("q_") ? pending.id.slice(2) : pending?.missing?.[0];
+  if (slot === "budget") return copy.home.placeholders.budget;
+  if (slot === "location") return copy.home.placeholders.location;
+  if (slot === "payment") return copy.home.placeholders.payment;
+  if (phase === "compare") return copy.home.placeholders.compare;
+  if (hasShops) return copy.home.placeholders.shops;
+  if (hasCards) return copy.home.placeholders.results;
+  return copy.home.placeholders.home;
+}
+
 export default function App() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -71,6 +87,7 @@ export default function App() {
   const routesKeyRef = useRef<string | null>(null);
   const tripRouteKeyRef = useRef<string | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const scrollShopsRef = useRef(false);
 
   // ------------------------------------------------------------- session
   useEffect(() => {
@@ -88,8 +105,15 @@ export default function App() {
   }, [toast]);
 
   useEffect(() => {
+    if (scrollShopsRef.current) return;
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages.length, cards.length, shops.length, followups.length, trip, ooc, compare]);
+
+  useEffect(() => {
+    if (!scrollShopsRef.current || !shops.length) return;
+    scrollShopsRef.current = false;
+    document.getElementById("shop-list")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [shops]);
 
   const applyResponse = useCallback((response: ApiResponse) => {
     if (response.messages?.length) {
@@ -113,10 +137,6 @@ export default function App() {
     }
     if (response.phase === "compare") {
       setCompare(response.compare ?? null);
-      // a comparison turn must not show a stale product feed or market banner
-      setCards([]);
-      setMore([]);
-      setMarket(null);
     } else if (response.phase) {
       setCompare(null);
     }
@@ -206,9 +226,29 @@ export default function App() {
           sessionId,
           value,
           slots.location?.lat !== undefined && slots.location?.lon !== undefined
-            ? { lat: slots.location.lat, lon: slots.location.lon }
+            ? { lat: slots.location.lat, lon: slots.location.lon, label: slots.location.label }
             : undefined,
         );
+        applyResponse(response);
+      } catch (error) {
+        handleError(error);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [applyResponse, busy, handleError, sessionId, slots.location],
+  );
+
+  const editSlot = useCallback(
+    async (slot: "product" | "budget" | "location" | "radius", text: string) => {
+      if (!sessionId || busy) return;
+      setBusy(true);
+      setStarted(true);
+      setMessages((prev) => [...prev, { role: "user", content: text }]);
+      try {
+        const response = await api.chat(sessionId, text, slots.location?.lat !== undefined && slots.location?.lon !== undefined
+          ? { lat: slots.location.lat, lon: slots.location.lon, label: slots.location.label }
+          : undefined, { slot, text });
         applyResponse(response);
       } catch (error) {
         handleError(error);
@@ -240,6 +280,7 @@ export default function App() {
   const selectProduct = useCallback(
     async (productId: string) => {
       if (!sessionId || busy) return;
+      scrollShopsRef.current = true;
       setBusy(true);
       setSelectedShops([]);
       if (productId !== product?.product_id) setTripPicks([]);
@@ -250,7 +291,9 @@ export default function App() {
       try {
         const response = await api.selectProduct(sessionId, productId, sort);
         applyResponse(response);
+        if (!response.shops?.length) scrollShopsRef.current = false;
       } catch (error) {
+        scrollShopsRef.current = false;
         handleError(error);
       } finally {
         setBusy(false);
@@ -423,7 +466,7 @@ export default function App() {
                       }
                     }}
                     rows={3}
-                    placeholder={copy.home.placeholder}
+                    placeholder={composerPlaceholder(pendingQuestion, compare ? "compare" : "", cards.length > 0, shops.length > 0)}
                     className="w-full resize-none bg-transparent text-[14px] leading-7 outline-none placeholder:text-brand-gray"
                   />
                   <button
@@ -483,13 +526,24 @@ export default function App() {
                 {busy ? <TypingIndicator /> : null}
 
                 {slots.query || cards.length ? (
-                  <SummaryBar slots={slots} radiusKm={radiusKm} onEdit={sendMessage} />
+                  <SummaryBar slots={slots} radiusKm={radiusKm} onEdit={editSlot} />
                 ) : null}
 
-                {cards.length ? (
+                {compare ? (
+                  <button
+                    type="button"
+                    onClick={() => setCompare(null)}
+                    className="rounded-full border border-brand-border bg-white px-3 py-1.5 text-[12px] font-bold"
+                  >
+                    {copy.cards.backToResults}
+                  </button>
+                ) : null}
+
+                {cards.length && !compare ? (
                   <ProductCards
                     cards={cards}
                     more={more}
+                    activeProductId={product?.product_id}
                     onSelect={selectProduct}
                     onSelectMore={selectProduct}
                     onCompare={compareSelected}
@@ -499,6 +553,7 @@ export default function App() {
                 {market && !ooc && !compare ? (
                   <MarketCard
                     market={market}
+                    filterEnabled={Boolean(product)}
                     filterActive={marketFilter?.market_id === market.market_id}
                     onFilterMarket={(next) =>
                       setMarketFilter((prev) =>
@@ -513,7 +568,7 @@ export default function App() {
                 {compare ? <CompareCard compare={compare} onPickSide={selectProduct} /> : null}
 
                 {shops.length ? (
-                  <section className="space-y-3">
+                  <section id="shop-list" className="space-y-3">
                     <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-brand-border bg-white p-3">
                       <span className="w-full text-[12px] font-bold">{copy.home.radiusTitle}</span>
                       {[2, 5, 10, null].map((radius) => (
@@ -614,7 +669,7 @@ export default function App() {
                     }
                   }}
                   rows={1}
-                  placeholder={copy.home.placeholder}
+                  placeholder={composerPlaceholder(pendingQuestion, compare ? "compare" : "", cards.length > 0, shops.length > 0)}
                   className="max-h-28 flex-1 resize-none rounded-2xl border border-brand-border bg-white px-3.5 py-2.5 text-[13.5px] leading-6 outline-none focus:border-brand-red"
                 />
                 <button

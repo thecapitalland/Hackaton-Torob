@@ -18,12 +18,14 @@ export function ProductCards({
   onSelect,
   onSelectMore,
   onCompare,
+  activeProductId,
 }: {
   cards: ProductCard[];
   more: MoreItem[];
   onSelect: (productId: string) => void;
   onSelectMore: (productId: string) => void;
   onCompare?: (productIds: string[]) => void;
+  activeProductId?: string | null;
 }) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [showMore, setShowMore] = useState(false);
@@ -43,6 +45,7 @@ export function ProductCards({
           const ribbon = RIBBONS[card.kind] ?? RIBBONS.best;
           const isOpen = expanded === card.product_id;
           const isSelected = selected.includes(card.product_id);
+          const shopsOpen = activeProductId === card.product_id;
           const disabled = selected.length >= 4 && !isSelected;
           return (
             <motion.article
@@ -50,7 +53,7 @@ export function ProductCards({
               layout
               initial={{ opacity: 0, y: 14 }}
               animate={{ opacity: 1, y: 0 }}
-              className="overflow-hidden rounded-card border border-brand-border bg-white shadow-card"
+              className={`overflow-hidden rounded-card border bg-white shadow-card ${shopsOpen ? "border-brand-red ring-2 ring-brand-red" : "border-brand-border"}`}
             >
               <div className={`${ribbon.className} flex items-center justify-between px-3 py-1.5 text-[12px] font-bold text-white`}>
                 <span>{ribbon.label}</span>
@@ -136,8 +139,10 @@ export function ProductCards({
 
               <div className="p-3">
                 <button
+                  type="button"
+                  aria-pressed={shopsOpen}
                   onClick={() => onSelect(card.product_id)}
-                  className="w-full rounded-xl bg-brand-red py-2.5 text-[13.5px] font-bold text-white"
+                  className={`w-full rounded-xl py-2.5 text-[13.5px] font-bold text-white ${shopsOpen ? "bg-brand-purple" : "bg-brand-red"}`}
                 >
                   {copy.cards.showShops}
                 </button>

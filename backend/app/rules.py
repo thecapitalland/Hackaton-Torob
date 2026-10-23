@@ -9,9 +9,20 @@ from __future__ import annotations
 
 import re
 
-from .normalize import BRAND_ALIASES, CATEGORY_SYNONYMS, NEIGHBORHOODS, fa_digits, normalize, tokenize
+from .normalize import (
+    BRAND_ALIASES,
+    CATEGORY_SYNONYMS,
+    NEIGHBORHOODS,
+    fa_digits,
+    geocode_neighbourhood,
+    normalize,
+    tokenize,
+)
 
-BUDGET_RE = re.compile(r"(\d+(?:[\.,٫]\d+)?)\s*(میلیون|میلیون\s+تومان|تومن|تومان|هزار|م)\b")
+BUDGET_RE = re.compile(
+    r"(\d+(?:[\.,٫]\d+)?)\s*(میلیون|میلیون\s+تومان|تومن|تومان|هزار|م|m)\b",
+    re.IGNORECASE,
+)
 RIALS_RE = re.compile(r"(\d+(?:[\.,٫]\d+)?)\s*ریال")
 NUMBER_RE = re.compile(r"(\d+(?:[\.,٫]\d+)?)")
 
@@ -67,7 +78,25 @@ UNIT_MULTIPLIERS = {
     "تومان": 1,
     "هزار": 1_000,
     "م": 1_000_000,
+    "m": 1_000_000,
 }
+
+# Colloquial amounts: «هفت» = 7, «هفتصد» = 700, then «هزار» / «میلیون».
+_NUMBER_ONES = {
+    "صفر": 0, "یک": 1, "یه": 1, "دو": 2, "سه": 3, "چهار": 4, "پنج": 5,
+    "شش": 6, "شیش": 6, "هفت": 7, "هشت": 8, "نه": 9, "ده": 10,
+    "یازده": 11, "دوازده": 12, "سیزده": 13, "چهارده": 14, "پانزده": 15,
+    "شانزده": 16, "هفده": 17, "هجده": 18, "نوزده": 19, "بیست": 20,
+    "سی": 30, "چهل": 40, "پنجاه": 50, "شصت": 60, "هفتاد": 70,
+    "هشتاد": 80, "نود": 90, "صد": 100, "یکصد": 100, "دویست": 200,
+    "سیصد": 300, "چهارصد": 400, "پانصد": 500, "ششصد": 600, "هفتصد": 700,
+    "هشتصد": 800, "نهصد": 900,
+}
+_NUMBER_SCALES = {"هزار": 1_000, "میلیون": 1_000_000, "میلیارد": 1_000_000_000}
+_MONEY_SUFFIXES = {"تومان", "تومن", "تومانه"}
+CHEAPER_WORDS = ("ارزون‌تر", "ارزونتر", "ارزان‌تر", "ارزانتر", "ارزون تر")
+VAGUE_PHRASES = ("یه چیزی", "یک چیزی", "چیزی میخوام", "چیزی می خواهم")
+SMALLTALK_PHRASES = ("سلام", "درود", "صبح بخیر", "عصر بخیر", "مرسی", "ممنون")
 
 # words that are question/shopping filler, never a product term
 _COMPARE_FILLERS = {
@@ -124,44 +153,169 @@ def _number(value: str) -> float:
     return float(value.replace(",", "").replace("٫", ".").replace("٬", ""))
 
 
-def parse_budget(text: str) -> tuple[int | None, int | None]:
-    """Return ``(budget_max, budget_min)`` in toman."""
+def _words_to_number(tokens: list[str]) -> int | None:
+    """Parse a pure Persian amount such as «هفت میلیون» or «هفتصد هزار»."""
+    if not tokens:
+        return None
+    total = 0
+    current = 0
+    seen = False
+    for token in tokens:
+        if token in _NUMBER_ONES:
+            current += _NUMBER_ONES[token]
+            seen = True
+            continue
+        if token in _NUMBER_SCALES:
+            current = (current or 1) * _NUMBER_SCALES[token]
+            total += current
+            current = 0
+            seen = True
+            continue
+        if token in _MONEY_SUFFIXES:
+            if 0 < current < 1000:
+                current *= 1_000_000
+            seen = True
+            continue
+        return None
+    if not seen:
+        return None
+    return total + current
+
+
+def _persian_amount(normalized: str) -> int | None:
+    tokens = normalized.split()
+    best: int | None = None
+    for start in range(len(tokens)):
+        for end in range(start + 1, min(len(tokens), start + 6) + 1):
+            span = tokens[start:end]
+            if not any(token in _NUMBER_ONES or token in _NUMBER_SCALES for token in span):
+                continue
+            value = _words_to_number(span)
+            if value is None:
+                continue
+            has_scale = any(token in _NUMBER_SCALES or token in _MONEY_SUFFIXES for token in span)
+            if not has_scale:
+                continue
+            if best is None or value > best:
+                best = value
+    return best
+
+
+def _apply_amount(normalized: str, amount: int) -> tuple[int | None, int | None]:
+    if "بیشتر" in normalized or "بالای" in normalized or "حداقل" in normalized:
+        return None, amount
+    return amount, None
+
+
+def parse_budget(text: str, *, budget_context: bool = False) -> tuple[int | None, int | None]:
+    """Return ``(budget_max, budget_min)`` in toman.
+
+    A bare number below 1000 counts as millions only when it answers a budget
+    question. «۷ تومن», «7m» and «زیر ۷» are colloquial millions anywhere.
+    """
     if not text:
         return None, None
     normalized = normalize(text)
+    normalized = re.sub(r"(?<=\d)[,٬](?=\d)", "", normalized)
     budget_max: int | None = None
     budget_min: int | None = None
 
     rials = RIALS_RE.search(normalized)
     if rials:
         amount = int(_number(rials.group(1)) / 10)
-        if "بیشتر" in normalized or "بالای" in normalized or "حداقل" in normalized:
-            budget_min = amount
-        else:
-            budget_max = amount
+        budget_max, budget_min = _apply_amount(normalized, amount)
 
     match = BUDGET_RE.search(normalized)
     if match:
-        amount = int(_number(match.group(1)) * UNIT_MULTIPLIERS.get(match.group(2).strip(), 1))
-        if "بیشتر" in normalized or "بالای" in normalized or "حداقل" in normalized:
-            budget_min = amount
-        else:
+        unit = match.group(2).strip().lower()
+        amount = int(_number(match.group(1)) * UNIT_MULTIPLIERS.get(unit, 1))
+        if unit in _MONEY_SUFFIXES and amount < 1000:
+            amount *= 1_000_000
+        budget_max, budget_min = _apply_amount(normalized, amount)
+
+    if budget_max is None and budget_min is None:
+        words = _persian_amount(normalized)
+        if words is not None:
+            budget_max, budget_min = _apply_amount(normalized, words)
+
+    if budget_max is None and budget_min is None:
+        small = re.fullmatch(r"(?:زیر|تا)\s*(\d+)", normalized)
+        if small:
+            amount = int(small.group(1))
+            if amount < 1000:
+                amount *= 1_000_000
             budget_max = amount
+
+    if budget_max is None and budget_min is None:
+        bare = re.fullmatch(r"\d+(?:[\.,]\d+)?", normalized)
+        if bare:
+            amount = int(_number(bare.group(0)))
+            if amount < 1000:
+                if budget_context:
+                    budget_max = amount * 1_000_000
+            else:
+                budget_max = amount
+        elif budget_context:
+            lone = _words_to_number(normalized.split())
+            if lone is not None and lone < 1000:
+                budget_max = lone * 1_000_000
     return budget_max, budget_min
 
 
+def is_budget_only(text: str) -> bool:
+    """True when the message states a price and no product."""
+    budget_max, budget_min = parse_budget(text, budget_context=True)
+    if budget_max is None and budget_min is None:
+        return False
+    return core_noun(text, None) is None and detect_category(text) is None
+
+
+def is_cheaper_request(text: str) -> bool:
+    normalized = normalize(text)
+    return any(normalize(word) in normalized for word in CHEAPER_WORDS)
+
+
+def _known_category(category: str, known_categories: list[str] | None) -> str | None:
+    if not known_categories:
+        return category
+    if category in known_categories:
+        return category
+    target = normalize(category)
+    for item in known_categories:
+        if normalize(item) == target:
+            return item
+    return None
+
+
 def detect_category(text: str, known_categories: list[str] | None = None) -> str | None:
-    """Map free text to a dataset category."""
+    """Map free text to a dataset category.
+
+    A product head noun beats a brand. «هدفون سامسونگ» stays headphones,
+    not «گوشی موبایل».
+    """
     if not text:
         return None
+    noun = core_noun(text, None)
+    if noun:
+        preferred = category_for_core_noun(noun, text, known_categories)
+        if preferred:
+            return preferred
     normalized = normalize(text)
+    brand_keys = {normalize(key) for key in BRAND_ALIASES}
     best: tuple[int, str] | None = None
     for synonym, category in CATEGORY_SYNONYMS.items():
         key = normalize(synonym)
-        if key and key in normalized:
-            score = len(key)
-            if best is None or score > best[0]:
-                best = (score, category)
+        if not key or key not in normalized:
+            continue
+        if noun and key in brand_keys:
+            continue
+        accepted = _known_category(category, known_categories)
+        if known_categories and accepted is None:
+            continue
+        score = len(key)
+        chosen = accepted or category
+        if best is None or score > best[0]:
+            best = (score, chosen)
     if best:
         return best[1]
     if known_categories:
@@ -201,6 +355,10 @@ _CORE_NOUN_MARKERS: tuple[tuple[str, str], ...] = (
     ("گوشی", "گوشی"),
     ("آیفون", "گوشی"),
     ("کفش", "کفش"),
+    ("قاب گوشی", "قاب"),
+    ("کاور گوشی", "قاب"),
+    ("قاب", "قاب"),
+    ("کاور", "قاب"),
 )
 
 CORE_NOUN_ALIASES: dict[str, tuple[str, ...]] = {
@@ -223,6 +381,7 @@ CORE_NOUN_ALIASES: dict[str, tuple[str, ...]] = {
     "کفش": ("کفش",),
     "هدفون": ("هدفون", "هدست", "هندزفری", "ایرپاد", "ایربادز"),
     "گوشی": ("گوشی", "موبایل", "آیفون"),
+    "قاب": ("قاب", "کاور", "درب"),
 }
 
 _CATEGORY_CORE_NOUNS = {
@@ -251,7 +410,7 @@ def core_noun(text: str, category: str | None = None) -> str | None:
     first = " ".join(tokenize(normalized)[:2])
     # In phrases such as «شارژر لپ‌تاپ» or «فیلتر یخچال», the first noun is
     # the requested accessory; the trailing device is a compatibility qualifier.
-    for noun in ("شارژر", "استابلایزر", "رگولاتور", "محافظ", "ترانس", "فیلتر", "کابل", "براکت"):
+    for noun in ("قاب", "کاور", "شارژر", "استابلایزر", "رگولاتور", "محافظ", "ترانس", "فیلتر", "کابل", "براکت"):
         if first == normalize(noun) or first.startswith(normalize(noun) + " "):
             return noun
     matches: list[tuple[int, str]] = []
@@ -272,15 +431,51 @@ def core_noun_aliases(noun: str | None) -> tuple[str, ...]:
     return CORE_NOUN_ALIASES.get(noun or "", (noun,) if noun else ())
 
 
+def category_for_core_noun(
+    noun: str | None,
+    text: str,
+    known_categories: list[str] | None = None,
+) -> str | None:
+    """Category implied by the head noun, never by a brand mention."""
+    if not noun:
+        return None
+    normalized = normalize(text)
+    if noun == "شارژر" and any(token in normalized for token in ("لپتاپ", "لپ تاپ", "نوت بوک")):
+        return _known_category("شارژر لپ تاپ", known_categories)
+    if noun == "شارژر" and "گوشی" in normalized:
+        return _known_category("شارژر گوشی", known_categories)
+    if noun in {"قاب", "یخچال"}:
+        return None
+    mapped = {
+        "هدفون": "هدفون، هدست و هندزفری",
+        "گوشی": "گوشی موبایل",
+        "لپ تاپ": "لپ تاپ و نوت بوک",
+        "کفش ورزشی": "کتانی و کفش اسپرت",
+    }.get(noun)
+    if mapped:
+        return _known_category(mapped, known_categories)
+    for synonym, category in CATEGORY_SYNONYMS.items():
+        if normalize(synonym) == normalize(noun):
+            return _known_category(category, known_categories)
+    return None
+
+
+def _without_radius_words(text: str) -> str:
+    cleaned = RADIUS_RE.sub(" ", normalize(text))
+    for token in ("شعاع", "کیلومتر"):
+        cleaned = cleaned.replace(token, " ")
+    return " ".join(cleaned.split())
+
+
 def detect_brand(text: str, known_brands: list[str] | None = None) -> str | None:
     """Find the longest explicit catalog brand name or configured alias."""
-    normalized = normalize(text)
+    normalized = _without_radius_words(text)
     if not normalized:
         return None
     brands = sorted(known_brands or [], key=lambda item: len(normalize(item)), reverse=True)
     for brand in brands:
         candidate = normalize(brand)
-        if candidate and re.search(rf"(?<!\w){re.escape(candidate)}(?!\w)", normalized):
+        if candidate and not candidate.isdigit() and re.search(rf"(?<!\w){re.escape(candidate)}(?!\w)", normalized):
             return brand
     tokens = set(tokenize(normalized))
     for marker, aliases in BRAND_ALIASES.items():
@@ -309,17 +504,35 @@ def detect_radius(text: str) -> tuple[bool, int | None]:
 
 
 def detect_location(text: str) -> dict | None:
-    """Find a known Tehran neighbourhood in the text."""
+    """Find a known Tehran neighbourhood in the text.
+
+    An exact name wins, so «ونک» is not resolved to «پونک».
+    """
     if not text:
         return None
     normalized = normalize(text)
-    for label, (lat, lon) in NEIGHBORHOODS.items():
+    squashed = normalized.replace(" ", "")
+    exact: list[tuple[int, str, tuple[float, float]]] = []
+    partial: list[tuple[int, str, tuple[float, float]]] = []
+    for label, coords in NEIGHBORHOODS.items():
         if label == "بازار رضا":
-            continue  # Mashhad - never part of the Tehran flow
+            continue
         key = normalize(label)
-        if key and key in normalized:
-            return {"label": label, "lat": lat, "lon": lon}
-    return None
+        if not key:
+            continue
+        key_squashed = key.replace(" ", "")
+        if key == normalized or key_squashed == squashed or f" {key} " in f" {normalized} ":
+            exact.append((len(key_squashed), label, coords))
+        elif key in normalized or (len(key_squashed) >= 5 and key_squashed in squashed):
+            partial.append((len(key_squashed), label, coords))
+    pool = exact or partial
+    if not pool:
+        return None
+    _, label, (lat, lon) = max(pool, key=lambda item: item[0])
+    resolved = geocode_neighbourhood(label)
+    if resolved:
+        return {"label": resolved["label"], "lat": resolved["lat"], "lon": resolved["lon"]}
+    return {"label": label, "lat": lat, "lon": lon}
 
 
 def detect_installment(text: str) -> bool | None:
@@ -399,6 +612,13 @@ _KEYWORD_STOP_WORDS: frozenset[str] = frozenset({
     "یا",
     "یک",
     "یه",
+    "میلیون",
+    "هزار",
+    "تومان",
+    "تومن",
+    "هفت",
+    "هفتصد",
+    "ده",
     "که",
     "برای",
     "من",
@@ -479,6 +699,47 @@ def _keyword_stop_words(category: str | None = None, extra: list[str] | None = N
         # every part of the category name (even short ones like «لپ»/«تاپ»)
         stop.update(normalize(category).split())
     return stop
+
+
+def dedupe_query_text(text: str) -> str:
+    """Drop repeated tokens and brand-alias pairs («نایک نایکی», «ورزشی ورزشی»)."""
+    if not text:
+        return ""
+    tokens = re.findall(r"[^\W_]+", text, flags=re.UNICODE)
+    if not tokens:
+        return text
+    groups = [
+        {normalize(alias) for alias in aliases}
+        for aliases in BRAND_ALIASES.values()
+    ]
+    kept: list[str] = []
+    for token in tokens:
+        key = normalize(token)
+        if any(key == normalize(previous) for previous in kept):
+            continue
+        if any(key in group and any(normalize(previous) in group for previous in kept) for group in groups):
+            continue
+        kept.append(token)
+    if kept == tokens:
+        return text
+    return " ".join(kept)
+
+
+def is_vague_request(text: str) -> bool:
+    normalized = normalize(text)
+    return any(normalize(phrase) in normalized for phrase in VAGUE_PHRASES)
+
+
+def is_smalltalk(text: str) -> bool:
+    normalized = normalize(text)
+    return any(normalize(phrase) in normalized for phrase in SMALLTALK_PHRASES)
+
+
+def is_card_followup(text: str) -> bool:
+    normalized = normalize(text)
+    if normalized in {"اولی", "اولین", "همون اولی", "همان اولی"}:
+        return True
+    return "کدوم" in normalized and "بهتر" in normalized
 
 
 def extract_keywords(text: str, category: str | None = None, extra_stop_words: list[str] | None = None) -> list[str]:
@@ -613,6 +874,8 @@ def rule_intent(
 
     if not in_torob:
         return {"action": "ooc", "query": product_term_for_intent(text), "confidence": 1.0}
+    if is_vague_request(text):
+        return {"action": "chitchat", "confidence": 1.0}
     if pair:
         return {"action": "compare", "sides": tuple(pair), "confidence": 1.0}
     core = core_noun(text, category)
@@ -651,9 +914,7 @@ def rule_intent(
             "confidence": 1.0,
         }
 
-    if not has_product and not last_query and any(
-        phrase in normalized for phrase in ("سلام", "درود", "صبح بخیر", "عصر بخیر", "مرسی", "ممنون")
-    ):
+    if not has_product and (is_smalltalk(text) or is_card_followup(text) or is_vague_request(text)):
         return {"action": "chitchat", "confidence": 1.0}
 
     keywords = extract_keywords(text, category, [location["label"]] if location else None)
@@ -665,7 +926,7 @@ def rule_intent(
             query_terms.append(keyword)
     if brand and normalize(brand) not in {normalize(term) for term in query_terms}:
         query_terms.append(brand)
-    query = " ".join(query_terms).strip() or normalize(text)[:80]
+    query = dedupe_query_text(" ".join(query_terms).strip() or normalize(text)[:80])
 
     if not has_product and not query_terms and not (budget_max or budget_min or location):
         return {"action": "chitchat", "confidence": 1.0}
@@ -687,8 +948,18 @@ def product_term_for_intent(text: str) -> str:
     return " ".join(extract_keywords(text))[:80] or normalize(text)[:80]
 
 
-def chitchat_reply(text: str) -> str:
+def chitchat_reply(text: str, cards: list | None = None) -> str:
     normalized = normalize(text)
+    shown = cards or []
+    if shown and is_card_followup(text):
+        title = str(shown[0].get("title") or shown[0].get("persian_title") or "کارت اول")
+        if "کدوم" in normalized:
+            return f"از همین کارت‌ها، «{title}» انتخاب بهتر است."
+        return f"منظورت همین اولی است: «{title}»."
+    if is_vague_request(text):
+        return "چه کالایی می‌خوای بخری؟ اسم محصول را بنویس."
+    if any(token in normalized for token in ("مرسی", "ممنون")):
+        return "خواهش می‌کنم. اگر بخواهی روی همین نتایج دقیق‌تر می‌گردم."
     if any(token in normalized for token in ("سلام", "درود", "صبح بخیر", "عصر بخیر")):
         return "سلام! چه کالایی را برای خرید حضوری جست‌وجو می‌کنید؟"
     return "برای شروع، نام کالا یا نیازتان را بنویسید."

@@ -17,15 +17,21 @@ export function MarketCard({
   onRoute,
   onFilterMarket,
   filterActive = false,
+  filterEnabled = false,
 }: {
   market: Market;
   onRoute?: (market: Market) => void;
   onFilterMarket?: (market: Market) => void;
   filterActive?: boolean;
+  filterEnabled?: boolean;
 }) {
   const [open, setOpen] = useState(true);
   const hours = hoursSummary(market);
-  const routeUrl = `https://neshan.org/maps/@${market.center?.[0]},${market.center?.[1]},16z`;
+  const lat = market.center?.[0];
+  const lon = market.center?.[1];
+  const routeUrl = lat !== undefined && lon !== undefined
+    ? `https://nshn.ir/?destination=${lat},${lon}`
+    : undefined;
 
   return (
     <section className="rounded-card border border-brand-border bg-white p-4 shadow-card">
@@ -77,18 +83,22 @@ export function MarketCard({
           </span>
 
           <div className="flex gap-2 pt-1">
-            <a
-              href={routeUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="flex-1 rounded-xl border border-brand-border py-2 text-center text-[12.5px] font-medium"
-            >
-              {copy.market.route}
-            </a>
+            {routeUrl ? (
+              <a
+                href={routeUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="flex-1 rounded-xl border border-brand-border py-2 text-center text-[12.5px] font-medium"
+              >
+                {copy.market.route}
+              </a>
+            ) : null}
             {onFilterMarket ? (
               <button
-                onClick={() => onFilterMarket(market)}
-                className={`flex-1 rounded-xl py-2 text-center text-[12.5px] font-bold ${
+                type="button"
+                disabled={!filterEnabled}
+                onClick={() => filterEnabled && onFilterMarket(market)}
+                className={`flex-1 rounded-xl py-2 text-center text-[12.5px] font-bold disabled:opacity-40 ${
                   filterActive
                     ? "border border-brand-green bg-brand-green/10 text-brand-green"
                     : "bg-brand-purple text-white"

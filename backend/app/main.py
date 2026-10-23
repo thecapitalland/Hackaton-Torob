@@ -8,6 +8,7 @@ approval and the "how did we get here" drawer.
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import logging
 import os
 import secrets
 import sqlite3
@@ -67,10 +68,23 @@ STATIC_DIR = (
     else _default_static_dir()
 )
 
+def _configure_logging() -> None:
+    """Keep llm_call cost lines visible without logging secrets."""
+    formatter = logging.Formatter("%(levelname)s %(name)s %(message)s")
+    handler = logging.StreamHandler()
+    handler.setFormatter(formatter)
+    for name in ("torobche", "torobche.llm", "torobche.decision", "torobche.catalog"):
+        named = logging.getLogger(name)
+        named.setLevel(logging.INFO)
+        if not any(isinstance(item, logging.StreamHandler) for item in named.handlers):
+            named.addHandler(handler)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     # Fail early with an actionable message instead of returning empty search
     # results when the LFS database was not hydrated or is a zero-byte file.
+    _configure_logging()
     await run_in_threadpool(ensure_catalog)
     yield
 
@@ -114,6 +128,7 @@ class ChatIn(BaseModel):
     text: str = ""
     # optional GPS position from the client (Update #1), never required
     location: GeoOrigin | None = None
+    edit: SlotEdit | None = None
 
 
 class ChatResponse(BaseModel):
@@ -165,6 +180,12 @@ class TripIn(BaseModel):
 class GeoOrigin(BaseModel):
     lat: float
     lon: float
+    label: str | None = None
+
+
+class SlotEdit(BaseModel):
+    slot: Literal["product", "budget", "location", "radius"]
+    text: str
 
 
 class LocationIn(BaseModel):
@@ -283,7 +304,7 @@ def _chat_answers_question(question: dict, text: str) -> bool:
     if slot == "location":
         return rules.detect_location(text) is not None
     if slot == "budget":
-        budget_max, budget_min = rules.parse_budget(text)
+        budget_max, budget_min = rules.parse_budget(text, budget_context=True)
         return budget_max is not None or budget_min is not None
     if slot == "payment":
         return rules.detect_installment(text) is not None or rules.is_yes_answer(text)
@@ -330,6 +351,7 @@ async def health() -> dict:
         "demo_mode": demo_mode(),
         "now": now_tehran().isoformat(),
         "markets": len(load_markets().get("markets") or []),
+        "neshan": neshan_service._is_available(),
     }
 
 
@@ -380,9 +402,21 @@ async def geo_search(q: str = "") -> dict:
             "lon": float(item["lon"]),
             "source": item.get("source") or "fallback",
         })
-        if len(results) == 8:
-            break
-    return {"results": results}
+    query_key = normalize_utils.normalize(query).replace(" ", "")
+
+    def _rank(item: dict) -> tuple[int, str]:
+        label = normalize_utils.normalize(item["name_fa"])
+        flat = label.replace(" ", "")
+        if label == normalize_utils.normalize(query) or flat == query_key:
+            score = 0
+        elif flat.startswith(query_key):
+            score = 1
+        else:
+            score = 2
+        return score, label
+
+    results.sort(key=_rank)
+    return {"results": results[:8]}
 
 
 @app.post("/api/location", response_model=ChatResponse)
@@ -463,10 +497,15 @@ def _nearest_neighbourhood(lat: float, lon: float) -> dict:
         if best_distance is None or distance < best_distance:
             best_distance = distance
             best_label = label
-    label = best_label or "تهران"
+    raw_label = best_label or "تهران"
+    resolved = normalize_utils.geocode_neighbourhood(raw_label)
+    label = (resolved or {}).get("label") or raw_label
+    near = best_distance is not None and best_distance > 800
+    display = f"نزدیک {label}" if near else label
     return {
-        "formatted_address": f"حوالی {label} (موقعیت تخمینی)",
+        "formatted_address": f"{display} (موقعیت تخمینی)",
         "neighbourhood": label,
+        "label": display,
         "source": "fallback",
     }
 
@@ -499,21 +538,54 @@ async def new_session() -> dict:
     return {"session_id": "s_" + secrets.token_hex(2)}
 
 
+def _question_slot(question: dict) -> str:
+    identifier = str(question.get("id") or "")
+    if identifier.startswith("q_"):
+        return identifier[2:]
+    missing = question.get("missing") or []
+    return str(missing[0]) if missing else ""
+
+
+def _reask_pending(session_id: str, question: dict, note: str) -> dict:
+    """Keep the open question and its query; do not start a new search."""
+    before = _state_snapshot(session_id)
+    values = before.get("values") or {}
+    payload = _base_payload(session_id, values, before, question)
+    payload["messages"] = [{"role": "assistant", "content": note}]
+    payload["cards"] = values.get("cards") or []
+    payload["more"] = values.get("more") or []
+    payload["specialty_market"] = values.get("specialty_market")
+    payload["shops"] = values.get("shops") or []
+    payload["product"] = values.get("product")
+    return payload
+
+
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(body: ChatIn) -> Any:
-    if not body.text.strip():
+    text = body.text.strip() or (body.edit.text.strip() if body.edit else "")
+    if not text:
         return _error("BAD_REQUEST", "پیام خالی است.")
     # FIX4-P1: a typed answer to the pending clarify question resolves it
     # (same flow as the chip buttons) instead of being dropped silently.
     question = _pending_question(body.session_id)
-    if question and _chat_answers_question(question, body.text):
-        return await _resume_and_respond(body.session_id, body.text)
+    if question and body.edit is None and _chat_answers_question(question, text):
+        return await _resume_and_respond(body.session_id, text)
+    if question and body.edit is None and _question_slot(question) in {"budget", "payment"}:
+        side = rules.is_refinement_text(text) or any(
+            word in rules.normalize(text) for word in ("تخفیف", "چانه", "ارزون", "گرون")
+        )
+        if side and rules.core_noun(text, None) is None and rules.detect_category(text) is None:
+            note = question.get("text") or "همان سؤال هنوز باز است."
+            if "تخفیف" in rules.normalize(text) or "چانه" in rules.normalize(text):
+                note = f"چانه را بعد از انتخاب فروشگاه می‌پرسیم. {note}"
+            return _reask_pending(body.session_id, question, str(note))
     before = _state_snapshot(body.session_id)
     payload: dict[str, Any] = {
         "action": "chat",
-        "text": body.text,
-        "messages": [{"role": "user", "content": body.text}],
+        "text": text,
+        "messages": [{"role": "user", "content": text}],
     }
+    payload["slot_edit"] = body.edit.model_dump() if body.edit is not None else None
     if question:
         # The user chose to continue with a regular message rather than
         # answer the open question. The interrupted clarify node has not

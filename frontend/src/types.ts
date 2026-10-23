@@ -167,6 +167,7 @@ export interface ParsedReply {
 export interface GeoAddress {
   formatted_address: string;
   neighbourhood?: string | null;
+  label?: string | null;
   source: "neshan" | "fallback";
 }
 

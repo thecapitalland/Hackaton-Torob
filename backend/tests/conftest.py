@@ -26,11 +26,25 @@ except Exception:  # pragma: no cover
     pass
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _skip_when_catalog_empty() -> None:
+    path = Path(os.environ["CATALOG_PATH"])
+    if not path.exists() or path.stat().st_size == 0:
+        pytest.skip(
+            f"catalog.db is missing or empty (0 bytes) at {path}. "
+            "Run git lfs pull, or build it with backend/scripts/build_catalog.py.",
+            allow_module_level=False,
+        )
+
+
 @pytest.fixture(scope="session")
 def catalog_path() -> Path:
     path = Path(os.environ["CATALOG_PATH"])
-    if not path.exists():
-        pytest.skip(f"catalog.db is missing at {path}")
+    if not path.exists() or path.stat().st_size == 0:
+        pytest.skip(
+            f"catalog.db is missing or empty (0 bytes) at {path}. "
+            "Run git lfs pull, or build it with backend/scripts/build_catalog.py."
+        )
     return path
 
 

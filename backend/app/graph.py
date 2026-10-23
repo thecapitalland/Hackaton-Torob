@@ -39,6 +39,7 @@ from .normalize import (
     NEIGHBORHOODS,
     SEARCH_ALIASES,
     fa_digits,
+    geocode_neighbourhood,
     normalize,
     tokenize,
 )
@@ -166,20 +167,64 @@ def _chat_json(node: str, messages: list[dict], **kwargs) -> dict | None:
 
 
 def _resolve_location(label: str | None) -> dict | None:
-    if not label:
+    resolved = geocode_neighbourhood(label)
+    if not resolved:
         return None
-    normalized = normalize(label)
-    for name, (lat, lon) in NEIGHBORHOODS.items():
-        if name == "بازار رضا":
-            continue
-        if normalize(name) in normalized or normalized in normalize(name):
-            return {"label": name, "lat": lat, "lon": lon}
-    return None
+    return {"label": resolved["label"], "lat": resolved["lat"], "lon": resolved["lon"]}
+
+
+def _decision_from_slot_edit(edit: dict) -> dict:
+    slot = str(edit.get("slot") or "")
+    text = str(edit.get("text") or "")
+    if slot == "budget":
+        budget_max, budget_min = rules.parse_budget(text, budget_context=True)
+        return {
+            "source": "rule",
+            "intent": {
+                "action": "refine",
+                "budget_max": budget_max,
+                "budget_min": budget_min,
+                "clear_budget_max": budget_min is not None and budget_max is None,
+                "confidence": 1.0,
+            },
+        }
+    if slot == "location":
+        place = _resolve_location(text) or rules.detect_location(text)
+        return {
+            "source": "rule",
+            "intent": {
+                "action": "change_location",
+                "area": (place or {}).get("label") or text,
+                "confidence": 1.0,
+            },
+        }
+    if slot == "radius":
+        _mentioned, radius = rules.detect_radius(text)
+        return {
+            "source": "rule",
+            "intent": {"action": "change_radius", "radius_km": radius, "confidence": 1.0},
+        }
+    return {
+        "source": "rule",
+        "intent": {
+            "action": "new_search",
+            "query": rules.dedupe_query_text(text)[:80] or text[:80],
+            "confidence": 1.0,
+        },
+    }
 
 
 def decide(state: AgentState) -> dict:
     """Run the typed action router before slot understanding/search."""
     started = time.time()
+    edit = state.get("slot_edit") or {}
+    if edit.get("slot"):
+        decision = _decision_from_slot_edit(edit)
+        return {
+            "decision": decision,
+            "last_question": None,
+            "trace": [_trace("decide", f"slot-edit · {decision['intent']['action']}", started)],
+        }
     current_slots = state.get("slots") or {}
     router_state = dict(state)
     router_state["summary_bar"] = {
@@ -211,8 +256,8 @@ def decide(state: AgentState) -> dict:
 def chitchat(state: AgentState) -> dict:
     text = state.get("text") or ""
     return {
-        "phase": "discover",
-        "messages": [{"role": "assistant", "content": rules.chitchat_reply(text)}],
+        "phase": state.get("phase") or "discover",
+        "messages": [{"role": "assistant", "content": rules.chitchat_reply(text, state.get("cards") or [])}],
     }
 
 
@@ -468,8 +513,11 @@ def understand(state: AgentState) -> dict:
     # A newly typed budget replaces the previous budget constraint. In
     # particular, «بالای ۱۰ میلیون هم بگرد» must not keep an older maximum
     # that would make the range impossible.
-    turn_budget_max, turn_budget_min = rules.parse_budget(text)
-    if turn_budget_max is not None:
+    turn_budget_max, turn_budget_min = rules.parse_budget(text, budget_context=bool(state.get("slot_edit")))
+    if rules.is_cheaper_request(text) and slots.get("budget_max") and turn_budget_max is None:
+        slots["budget_max"] = max(10_000, int(int(slots["budget_max"]) * 0.8))
+        slots["budget_skipped"] = False
+    elif turn_budget_max is not None:
         slots["budget_max"] = turn_budget_max
         slots["budget_min"] = None
         slots["budget_skipped"] = False
@@ -492,17 +540,33 @@ def understand(state: AgentState) -> dict:
 
     # Update #1: a GPS position from the client fills an empty location slot,
     # but an explicit text location above always wins.
+    edit_slot = str((state.get("slot_edit") or {}).get("slot") or "")
     user_location = state.get("user_location") or {}
+    incoming_label = str(user_location.get("label") or "").strip()
+    has_real_label = bool(incoming_label) and incoming_label != "موقعیت فعلی شما"
+    resolved_this_turn = bool(
+        extracted.get("location")
+        or decision_action == "change_location"
+        or edit_slot == "location"
+        or rules.detect_location(text)
+    )
     if (
-        not slots.get("location")
+        not resolved_this_turn
         and user_location.get("lat") is not None
         and user_location.get("lon") is not None
     ):
-        slots["location"] = {
-            "label": user_location.get("label") or "موقعیت فعلی شما",
-            "lat": user_location["lat"],
-            "lon": user_location["lon"],
-        }
+        if has_real_label:
+            slots["location"] = {
+                "label": incoming_label,
+                "lat": user_location["lat"],
+                "lon": user_location["lon"],
+            }
+        elif not slots.get("location"):
+            slots["location"] = {
+                "label": "موقعیت فعلی شما",
+                "lat": user_location["lat"],
+                "lon": user_location["lon"],
+            }
 
     # the comparison wording must not become the shopping query either
     # FIX5-D1: a *fresh* shopping message (its own category or product
@@ -511,14 +575,16 @@ def understand(state: AgentState) -> dict:
     # wins over whatever a previous search left behind.
     residual = rules.residual_tokens(text)
     slot_only = bool(rules.slot_ack(text)) and not residual
+    budget_only = rules.is_budget_only(text) or edit_slot in {"budget", "location", "radius"}
     fresh = (
         not is_compare_turn
-        and decision_action != "refine"
+        and decision_action not in {"refine", "change_location", "change_radius"}
         and not slot_only
+        and not budget_only
         and not rules.is_refinement_text(text)
         and bool(extracted.get("category") or extracted.get("keywords"))
     )
-    if decision_action == "new_search" and not is_compare_turn:
+    if decision_action == "new_search" and not is_compare_turn and not budget_only:
         fresh = True
     if fresh:
         slots["query"] = (
@@ -536,8 +602,10 @@ def understand(state: AgentState) -> dict:
         slots["brand"] = extracted.get("brand")
         if decision_data:
             slots["accessory_request"] = bool(decision_data.get("accessory_request"))
-    elif not slots.get("query") and not is_compare_turn:
+    elif not slots.get("query") and not is_compare_turn and not budget_only:
         slots["query"] = text
+    if slots.get("query"):
+        slots["query"] = rules.dedupe_query_text(str(slots["query"]))
     if slots.get("category") and slots["category"] in ACCESSORY_CATEGORIES:
         slots["category"] = None
     slots["keywords"] = _clean_keywords(slots.get("keywords"), slots.get("location"))
@@ -580,6 +648,9 @@ def understand(state: AgentState) -> dict:
         "compare": None,
         "messages": [{"role": "assistant", "content": acknowledge}] if acknowledge else [],
         "trace": [_trace("understand", summary, started)],
+        # A chip edit is only for this turn. Leaving it on the checkpoint
+        # makes the next typed message repeat the old chip.
+        "slot_edit": None,
     }
 
 
@@ -624,7 +695,7 @@ def _apply_clarify_answer(slot: str, answer: str, slots: dict) -> dict:
         return updated
 
     if slot == "budget":
-        budget_max, budget_min = rules.parse_budget(answer)
+        budget_max, budget_min = rules.parse_budget(answer, budget_context=True)
         if budget_max:
             updated["budget_max"] = budget_max
             updated["budget_skipped"] = False
@@ -729,12 +800,22 @@ def _product_matches_relevance(
     allow_accessories: bool = False,
 ) -> bool:
     title = str(item.get("persian_title") or "")
-    # With an exact dataset category, the category itself guarantees the core
-    # noun. Without one, preserve the core noun at every relaxation rung.
-    if core and not category and not any(
-        _contains_phrase(title, alias) for alias in rules.core_noun_aliases(core)
-    ):
-        return False
+    category_name = str(item.get("category_name") or "")
+    # The head noun has to appear in the title or the category. A brand must
+    # not pull a different product, and «یخچال» must not surface coolers.
+    if core:
+        aliases = rules.core_noun_aliases(core)
+        in_title = any(
+            _contains_phrase(title, alias) or normalize(alias) in normalize(title)
+            for alias in aliases
+        )
+        in_category = any(normalize(alias) in normalize(category_name) for alias in aliases)
+        if not in_title and not in_category:
+            return False
+        if core == "یخچال" and not any(marker in normalize(query) for marker in ("یخدان", "مسافر", "سفری")):
+            blob = normalize(f"{title} {category_name}")
+            if any(marker in blob for marker in ("یخدان", "کلمن", "مسافرت", "سفری", "پرتابل", "portable")):
+                return False
 
     title_tokens = set(tokenize(title))
     if not allow_accessories:
@@ -771,7 +852,13 @@ def _search_relevant_products(
     core = rules.core_noun(query, category)
     brand_groups = _requested_brand_groups(query)
     selected_category = category
-    if not selected_category and core:
+    if core:
+        noun_category = rules.category_for_core_noun(core, query, _known_categories())
+        if noun_category:
+            selected_category = noun_category
+        elif core == "قاب":
+            selected_category = None
+    if not selected_category and core and core != "قاب":
         selected_category = _dominant_category(
             keywords,
             budget_max,
@@ -790,6 +877,11 @@ def _search_relevant_products(
                 (keywords, selected_category, 2, "any"),
             ]
         )
+    if core == "قاب":
+        brand_word = brand_groups[0][0] if brand_groups else None
+        for alias in reversed(rules.core_noun_aliases("قاب")):
+            words = [alias, brand_word] if brand_word else [alias]
+            attempts.insert(0, (words, None, 1, "all"))
     attempts.extend(
         [
             (keywords, selected_category, 1, "all"),
