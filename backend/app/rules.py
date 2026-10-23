@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 
-from .normalize import CATEGORY_SYNONYMS, NEIGHBORHOODS, fa_digits, normalize
+from .normalize import BRAND_ALIASES, CATEGORY_SYNONYMS, NEIGHBORHOODS, fa_digits, normalize, tokenize
 
 BUDGET_RE = re.compile(r"(\d+(?:[\.,٫]\d+)?)\s*(میلیون|میلیون\s+تومان|تومن|تومان|هزار|م)\b")
 RIALS_RE = re.compile(r"(\d+(?:[\.,٫]\d+)?)\s*ریال")
@@ -165,7 +165,7 @@ def detect_category(text: str, known_categories: list[str] | None = None) -> str
     if best:
         return best[1]
     if known_categories:
-        for category in known_categories:
+        for category in sorted(known_categories, key=lambda item: len(normalize(item)), reverse=True):
             key = normalize(category)
             if key and key in normalized:
                 return category
@@ -173,9 +173,22 @@ def detect_category(text: str, known_categories: list[str] | None = None) -> str
 
 
 _CORE_NOUN_MARKERS: tuple[tuple[str, str], ...] = (
+    ("ماشین لباسشویی", "ماشین لباسشویی"),
+    ("تلویزیون", "تلویزیون"),
+    ("مانیتور", "مانیتور"),
+    ("شارژر", "شارژر"),
+    ("استابلایزر", "استابلایزر"),
+    ("رگولاتور", "رگولاتور"),
+    ("محافظ", "محافظ"),
+    ("ترانس", "ترانس"),
+    ("فیلتر", "فیلتر"),
+    ("کابل", "کابل"),
+    ("براکت", "براکت"),
+    ("کولر", "کولر"),
     ("لپ تاپ", "لپ تاپ"),
     ("لپتاپ", "لپ تاپ"),
     ("نوت بوک", "لپ تاپ"),
+    ("یخچال", "یخچال"),
     ("کفش ورزشی", "کفش ورزشی"),
     ("کتونی", "کتونی"),
     ("کتانی", "کتونی"),
@@ -191,7 +204,20 @@ _CORE_NOUN_MARKERS: tuple[tuple[str, str], ...] = (
 )
 
 CORE_NOUN_ALIASES: dict[str, tuple[str, ...]] = {
+    "ماشین لباسشویی": ("ماشین لباسشویی", "لباسشویی"),
+    "تلویزیون": ("تلویزیون",),
+    "مانیتور": ("مانیتور",),
+    "شارژر": ("شارژر",),
+    "استابلایزر": ("استابلایزر", "استابلایزر برق"),
+    "رگولاتور": ("رگولاتور",),
+    "محافظ": ("محافظ",),
+    "ترانس": ("ترانس",),
+    "فیلتر": ("فیلتر",),
+    "کابل": ("کابل",),
+    "براکت": ("براکت",),
+    "کولر": ("کولر",),
     "لپ تاپ": ("لپ تاپ", "لپتاپ", "نوت بوک", "نوتبوک"),
+    "یخچال": ("یخچال",),
     "کتونی": ("کتونی", "کتانی"),
     "کفش ورزشی": ("کفش ورزشی", "کتونی", "کتانی"),
     "کفش": ("کفش",),
@@ -200,7 +226,14 @@ CORE_NOUN_ALIASES: dict[str, tuple[str, ...]] = {
 }
 
 _CATEGORY_CORE_NOUNS = {
+    "ماشین لباسشویی": "ماشین لباسشویی",
+    "مانیتور": "مانیتور",
+    "تلویزیون": "تلویزیون",
     "لپ تاپ و نوت بوک": "لپ تاپ",
+    "یخچال فریزر بالاپایین": "یخچال",
+    "یخچال فریزر در فرانسوی": "یخچال",
+    "یخچال فریزر دوقلو": "یخچال",
+    "یخچال فریزر ساید بای ساید": "یخچال",
     "کتانی و کفش اسپرت": "کفش ورزشی",
     "هدفون، هدست و هندزفری": "هدفون",
     "گوشی موبایل": "گوشی",
@@ -215,6 +248,12 @@ def core_noun(text: str, category: str | None = None) -> str | None:
     """
     normalized = normalize(text)
     tokens = set(re.findall(r"[^\W_]+", normalized, flags=re.UNICODE))
+    first = " ".join(tokenize(normalized)[:2])
+    # In phrases such as «شارژر لپ‌تاپ» or «فیلتر یخچال», the first noun is
+    # the requested accessory; the trailing device is a compatibility qualifier.
+    for noun in ("شارژر", "استابلایزر", "رگولاتور", "محافظ", "ترانس", "فیلتر", "کابل", "براکت"):
+        if first == normalize(noun) or first.startswith(normalize(noun) + " "):
+            return noun
     matches: list[tuple[int, str]] = []
     for marker, noun in _CORE_NOUN_MARKERS:
         marker_tokens = normalize(marker).split()
@@ -231,6 +270,42 @@ def core_noun(text: str, category: str | None = None) -> str | None:
 
 def core_noun_aliases(noun: str | None) -> tuple[str, ...]:
     return CORE_NOUN_ALIASES.get(noun or "", (noun,) if noun else ())
+
+
+def detect_brand(text: str, known_brands: list[str] | None = None) -> str | None:
+    """Find the longest explicit catalog brand name or configured alias."""
+    normalized = normalize(text)
+    if not normalized:
+        return None
+    brands = sorted(known_brands or [], key=lambda item: len(normalize(item)), reverse=True)
+    for brand in brands:
+        candidate = normalize(brand)
+        if candidate and re.search(rf"(?<!\w){re.escape(candidate)}(?!\w)", normalized):
+            return brand
+    tokens = set(tokenize(normalized))
+    for marker, aliases in BRAND_ALIASES.items():
+        if marker not in tokens:
+            continue
+        for brand in brands:
+            if normalize(brand) in {normalize(alias) for alias in aliases}:
+                return brand
+    return None
+
+
+RADIUS_RE = re.compile(r"(?<!\d)(\d{1,2})\s*(?:کیلومتر|km)\b", re.IGNORECASE)
+RADIUS_VALUES = {2, 5, 10}
+
+
+def detect_radius(text: str) -> tuple[bool, int | None]:
+    """Return (was-mentioned, radius); None radius explicitly means all Tehran."""
+    normalized = normalize(text)
+    if any(phrase in normalized for phrase in ("کل تهران", "همه تهران", "تمام تهران")):
+        return True, None
+    match = RADIUS_RE.search(normalized)
+    if not match:
+        return False, None
+    value = int(match.group(1))
+    return (True, value) if value in RADIUS_VALUES else (False, None)
 
 
 def detect_location(text: str) -> dict | None:
@@ -292,7 +367,7 @@ def _strip_slot_words(text: str) -> str:
         cleaned = normalize(word)
         if cleaned:
             normalized = normalized.replace(cleaned, " ")
-    for token in ("محله", "پرداخت", "نقدی"):
+    for token in ("محله", "پرداخت", "نقدی", "کیلومتر", "شعاع", "km", "کل تهران"):
         normalized = normalized.replace(token, " ")
     return normalized
 
@@ -337,9 +412,17 @@ _KEYWORD_STOP_WORDS: frozenset[str] = frozenset({
     "گرون",
     "ارزون",
     "میلیون",
+    "کیلومتر",
+    "شعاع",
     "تومان",
     "تومن",
     "میلیونی",
+    "بالای",
+    "بیشتر",
+    "کمتر",
+    "هم",
+    "بگرد",
+    "بگردم",
     "تا",
     "زیر",
     "حدود",
@@ -507,6 +590,108 @@ def is_skip_answer(text: str) -> bool:
     if not normalized:
         return False
     return any(normalize(word) in normalized for word in SKIP_ANSWER_WORDS)
+
+
+def rule_intent(
+    text: str,
+    state: dict | None = None,
+    *,
+    known_categories: list[str] | None = None,
+    known_brands: list[str] | None = None,
+) -> dict:
+    """Deterministic action and slot proposal used when the router is off/unsafe."""
+    state = state or {}
+    slots = state.get("slots") or {}
+    last_query = str(state.get("last_query") or slots.get("query") or "")
+    category = detect_category(text, known_categories)
+    brand = detect_brand(text, known_brands)
+    location = detect_location(text)
+    budget_max, budget_min = parse_budget(text)
+    radius_mentioned, radius = detect_radius(text)
+    pair = extract_compare(text)
+    in_torob = detect_in_torob(text)
+
+    if not in_torob:
+        return {"action": "ooc", "query": product_term_for_intent(text), "confidence": 1.0}
+    if pair:
+        return {"action": "compare", "sides": tuple(pair), "confidence": 1.0}
+    core = core_noun(text, category)
+    has_product = bool(category or core)
+    if radius_mentioned and last_query and not has_product and not brand:
+        return {"action": "change_radius", "radius_km": radius, "confidence": 1.0}
+    explicit_slot_edit = bool(
+        budget_max is not None
+        or budget_min is not None
+        or brand
+        or location
+        or detect_installment(text) is not None
+        or is_yes_answer(text)
+        or is_refinement_text(text)
+    )
+
+    selected_product = state.get("selected_product_id") or slots.get("selected_product_id")
+    normalized = normalize(text)
+    if selected_product and any(word in normalized for word in ("چانه", "تخفیف", "موجودی فروشگاه")):
+        target, _ = parse_budget(text)
+        return {"action": "haggle", "target_price": target, "confidence": 1.0}
+
+    if last_query and location and not has_product and not brand and budget_max is None and budget_min is None:
+        return {"action": "change_location", "area": location["label"], "confidence": 1.0}
+
+    if last_query and explicit_slot_edit and not has_product:
+        area = location["label"] if location else None
+        return {
+            "action": "refine",
+            "budget_min": budget_min,
+            "budget_max": budget_max,
+            "clear_budget_max": budget_min is not None and slots.get("budget_max") is not None,
+            "brand": brand,
+            "category": category,
+            "area": area,
+            "confidence": 1.0,
+        }
+
+    if not has_product and not last_query and any(
+        phrase in normalized for phrase in ("سلام", "درود", "صبح بخیر", "عصر بخیر", "مرسی", "ممنون")
+    ):
+        return {"action": "chitchat", "confidence": 1.0}
+
+    keywords = extract_keywords(text, category, [location["label"]] if location else None)
+    query_terms: list[str] = []
+    if core:
+        query_terms.append(core)
+    for keyword in keywords:
+        if normalize(keyword) not in {normalize(part) for part in query_terms}:
+            query_terms.append(keyword)
+    if brand and normalize(brand) not in {normalize(term) for term in query_terms}:
+        query_terms.append(brand)
+    query = " ".join(query_terms).strip() or normalize(text)[:80]
+
+    if not has_product and not query_terms and not (budget_max or budget_min or location):
+        return {"action": "chitchat", "confidence": 1.0}
+    return {
+        "action": "new_search",
+        "query": query[:80],
+        "category": category,
+        "brand": brand,
+        "budget_min": budget_min,
+        "budget_max": budget_max,
+        "area": location["label"] if location else None,
+        "radius_km": radius if radius_mentioned else None,
+        "confidence": 1.0,
+    }
+
+
+def product_term_for_intent(text: str) -> str:
+    """Short OOC label used by the typed decision contract."""
+    return " ".join(extract_keywords(text))[:80] or normalize(text)[:80]
+
+
+def chitchat_reply(text: str) -> str:
+    normalized = normalize(text)
+    if any(token in normalized for token in ("سلام", "درود", "صبح بخیر", "عصر بخیر")):
+        return "سلام! چه کالایی را برای خرید حضوری جست‌وجو می‌کنید؟"
+    return "برای شروع، نام کالا یا نیازتان را بنویسید."
 
 
 CLARIFY_QUESTIONS = {

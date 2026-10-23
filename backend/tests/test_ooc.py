@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 
+from app import graph
 from app.tools import ooc
 
 
@@ -105,3 +106,28 @@ def test_fallback_message_is_honest():
 def test_no_market_message():
     message = ooc.fallback_message("چیز کاملاً ناشناخته", None)
     assert "پیدا نکردم" in message
+
+
+def test_ooc_guide_filters_untrusted_market_brand_and_number(monkeypatch, catalog_path):
+    class FakeClient:
+        def chat_json(self, _messages, **_kwargs):
+            return {
+                "category_guess": "دستهٔ خیالی",
+                "tips": [
+                    "این بسته را با قیمت ۵ میلیون بخر",
+                    "از فروشگاه خیالی در خیابان نمونه خرید کن",
+                    "پلمب و تاریخ محصول را پیش از خرید بررسی کن",
+                ],
+                "markets": ["fake-market"],
+                "brands_generic": ["برند خیالی"],
+            }
+
+    monkeypatch.setattr(graph, "get_client", lambda: FakeClient())
+    result = graph.out_of_catalog({"text": "زعفران", "slots": {"query": "زعفران"}})
+    guide = result["ooc"]["guide"]
+    assert result["ooc"]["message_fa"] == "این کالا رو نداریم."
+    assert guide["category_guess"] is None
+    assert guide["markets"] == ["molavi"]
+    assert guide["brands_generic"] == []
+    assert guide["tips"] == ["پلمب و تاریخ محصول را پیش از خرید بررسی کن"]
+    assert result["ooc"]["market"]["market_id"] == "molavi"

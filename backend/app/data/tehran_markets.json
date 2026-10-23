@@ -1,0 +1,10 @@
+[
+  {"market_id":"molavi","aliases":["gb_spice","ادویه","عطاری","مولوی"],"name_fa":"بازار مولوی (راستهٔ عطاری‌ها)","center":[35.6725,51.4235]},
+  {"market_id":"bazaar_bozorg","aliases":["بازار بزرگ","بازار تهران"],"name_fa":"بازار بزرگ تهران","center":[35.6762,51.4220]},
+  {"market_id":"jomhouri_hafez","aliases":["جمهوری","حافظ","بورس موبایل"],"name_fa":"بورس جمهوری–حافظ","center":[35.6950,51.4115]},
+  {"market_id":"alaeddin","aliases":["علاءالدین","علاالدین"],"name_fa":"پاساژ علاءالدین","center":[35.6947,51.4112]},
+  {"market_id":"charsou","aliases":["چارسو"],"name_fa":"پاساژ چارسو","center":[35.6878,51.4125]},
+  {"market_id":"lalehzar","aliases":["لاله زار","لاله‌زار"],"name_fa":"خیابان لاله‌زار","center":[35.6923,51.4229]},
+  {"market_id":"manuchehri","aliases":["منوچهری"],"name_fa":"خیابان منوچهری","center":[35.6820,51.4200]},
+  {"market_id":"naserkhosro","aliases":["ناصرخسرو","ناصر خسرو"],"name_fa":"خیابان ناصرخسرو","center":[35.6790,51.4210]}
+]

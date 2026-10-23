@@ -68,7 +68,7 @@ def understand_messages(payload: dict) -> list[dict]:
 # --------------------------------------------------------------------------
 
 CLARIFY_SYSTEM = """تو تربچه‌ای. اطلاعات ناقص: {missing}. فقط متن یک سؤال کوتاه و روشن فارسی (حداکثر ۱۲ کلمه) را بنویس. برای چیپ‌ها تصمیم نگیر.
-خروجی: {"text": "..."}"""
+خروجی فقط یک JSON معتبر است: {"text": "..."}"""
 
 
 def clarify_messages(payload: dict) -> list[dict]:
@@ -86,7 +86,7 @@ def clarify_messages(payload: dict) -> list[dict]:
 RECOMMEND_SYSTEM = """تو تربچه‌ای. برای هر کارت (best/budget/premium) فقط بر اساس داده‌های داده‌شده (عنوان، قیمت، تعداد فروشگاه، مشخصات) یک دلیل یک‌جمله‌ای فارسی (حداکثر ۲۵ کلمه) و ۳ نکتهٔ کوتاه از مشخصات بنویس.
 ممنوع: ساختن نظر کاربران، ادعای اصالت، قیمت یا فروشگاهی که در ورودی نیست. اگر قیمت نسبت به برند غیرعادی پایین است هشدار بده.
 اگر ورودی specialty_market دارد، یک جملهٔ فارسی اضافه کن: «برای این دسته، بورس اصلی تهران {name_fa} است؛ {N} فروشگاه در داده‌ها، ارزش سر زدن دارد.» فقط از اعداد و نام داده‌شده استفاده کن؛ ساعت بازار را فقط با «معمولاً» بگو. بازار رضا (مشهد) ممنوع.
-خروجی: {"cards":[{"product_id":"...","why":"...","highlights":["...","...","..."],"warning":null}],"market_line":"..."}"""
+خروجی فقط JSON معتبر: {"cards":[{"product_id":"...","why":"...","highlights":["...","...","..."],"warning":null}],"market_line":"..."}"""
 
 
 def recommend_messages(payload: dict) -> list[dict]:
@@ -100,7 +100,7 @@ def recommend_messages(payload: dict) -> list[dict]:
 # §4 plan_contact
 # --------------------------------------------------------------------------
 
-PLAN_CONTACT_SYSTEM = """تو تربچه‌ای و از طرف خریدار به فروشگاه پیام کوتاه می‌دهی. مؤدب، کوتاه (حداکثر ۴۰ کلمه)، با معرفی «دستیار تربچه»، نام دقیق محصول/مدل، و این سؤال‌ها: موجودی امروز، قیمت نهایی حضوری، ساعت کاری؛ اگر installment=true بپرس «اقساطی/ترب‌پی دارید؟». اگر target_price_text در ورودی بود، دقیقاً همین عدد را در یک سؤال مؤدبانه بیاور (مثلاً «با ۲٬۹۰۰٬۰۰۰ حضوری می‌دید؟»). هیچ عدد یا قیمت دیگری نساز و هیچ اطلاعات شخصی خریدار نده.
+PLAN_CONTACT_SYSTEM = """تو تربچه‌ای و از طرف خریدار به فروشگاه پیام کوتاه می‌دهی. مؤدب، کوتاه (حداکثر ۴۰ کلمه)، با معرفی «دستیار تربچه»، نام دقیق محصول/مدل، و این سؤال‌ها: موجودی امروز، قیمت نهایی حضوری، ساعت کاری؛ اگر installment=true بپرس «اقساطی/ترب‌پی دارید؟». اگر target_price_text در ورودی بود، دقیقاً همین عدد را در یک سؤال مؤدبانه بیاور (مثلاً «با ۲٬۹۰۰٬۰۰۰ حضوری می‌دید؟»). هیچ عدد یا قیمت دیگری نساز و هیچ اطلاعات شخصی خریدار نده. خروجی فقط JSON معتبر باشد.
 خروجی: {"message":"..."}"""
 
 
@@ -115,7 +115,7 @@ def plan_contact_messages(payload: dict) -> list[dict]:
 # §5 haggle
 # --------------------------------------------------------------------------
 
-HAGGLE_SYSTEM = """تو «تربچه» هستی و برای خریدار یک تحلیل کوتاه چانه‌زنی حضوری می‌نویسی. خروجی: {"lines":["...","..."]} با ۲ تا ۳ جملهٔ کوتاه فارسی (هر جمله حداکثر ۱۸ کلمه).
+HAGGLE_SYSTEM = """تو «تربچه» هستی و برای خریدار یک تحلیل کوتاه چانه‌زنی حضوری می‌نویسی. خروجی یک JSON معتبر باشد: {"lines":["...","..."]} با ۲ تا ۳ جملهٔ کوتاه فارسی (هر جمله حداکثر ۱۸ کلمه).
 قواعد سخت:
 ۱) فقط از داده‌های ورودی استفاده کن: نام فروشگاه، قیمت، فاصله، هدف، سقف، میانه. هیچ عدد یا فروشگاهی از خودت نساز.
 ۲) اگر leverage هست، نام همان فروشگاه و قیمت و فاصلهٔ داده‌شده را بیاور؛ جملهٔ دوم سؤال مؤدبانه با target_text باشد.
@@ -152,7 +152,7 @@ def parse_replies_messages(payload: dict) -> list[dict]:
 # §6 build_trip
 # --------------------------------------------------------------------------
 
-BUILD_TRIP_SYSTEM = """تو تربچه‌ای. با داده‌های توقف‌ها (فروشگاه تأییدشده، پلن B، کافه نمونه) یک خلاصهٔ ۲-۳ جمله‌ای صمیمی فارسی بنویس: اول کجا برو، چه چیزی را چک کن، پلن B چیست. فاصله‌ها تخمینی‌اند؛ این را بگو. خروجی: {"summary":"..."}"""
+BUILD_TRIP_SYSTEM = """تو تربچه‌ای. با داده‌های توقف‌ها (فروشگاه تأییدشده، پلن B، کافه نمونه) یک خلاصهٔ ۲-۳ جمله‌ای صمیمی فارسی بنویس: اول کجا برو، چه چیزی را چک کن، پلن B چیست. فاصله‌ها تخمینی‌اند؛ این را بگو. خروجی فقط JSON معتبر باشد: {"summary":"..."}"""
 
 
 def build_trip_messages(payload: dict) -> list[dict]:
@@ -183,6 +183,17 @@ def out_of_catalog_messages(payload: dict) -> list[dict]:
     ]
 
 
+OOC_GUIDE_SYSTEM = """تو راهنمای عمومی خرید ترب‌چه هستی. با query و گزینه‌های داده‌شده راهنمای کوتاه بده. خروجی فقط JSON معتبر با فیلدهای category_guess (دسته یا null)، tips (حداکثر ۳ نکته)، markets (فقط شناسهٔ بازار از whitelist)، brands_generic (نام برند واقعی از فهرست داده‌شده) باشد.
+قواعد سخت: قیمت، هیچ عددی، شماره تماس، آدرس/پلاک یا نام مغازه/فروشنده نساز. فقط بازارهای whitelist را پیشنهاد بده. اگر گزینهٔ مرتبطی نیست، فهرست‌ها را خالی بگذار. ادعای موجودی/کیفیت/گارانتی نکن."""
+
+
+def ooc_guide_messages(payload: dict) -> list[dict]:
+    return [
+        {"role": "system", "content": OOC_GUIDE_SYSTEM},
+        {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+    ]
+
+
 # --------------------------------------------------------------------------
 # §10 compare («X یا Y کدوم بهتره؟»)
 # --------------------------------------------------------------------------
@@ -200,4 +211,39 @@ def compare_messages(payload: dict) -> list[dict]:
     return [
         {"role": "system", "content": COMPARE_SYSTEM},
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+    ]
+
+
+# --------------------------------------------------------------------------
+# typed action router
+# --------------------------------------------------------------------------
+
+ROUTER_SYSTEM = """تو روتر پیام‌های ترب‌چه هستی. فقط یک JSON مطابق schema دریافتی برگردان؛ عددها به تومان صحیح باشند، مقدار نگفته را null بگذار و مقدار ۰ یا رشتهٔ خالی را برای فیلد اختیاری نفرست.
+actionها: new_search (محصول تازه)، refine (اصلاح بودجه/برند روی query قبلی)، change_radius، change_location، compare، haggle، ooc، chitchat.
+خروجی flat است و فیلدهای آن عبارت‌اند از action, confidence, query, category, brand, budget_min, budget_max, clear_budget_max, area, radius_km, sides, target_price. فقط فیلدهای لازم برای action را مقدار بده.
+اگر last_query وجود دارد و پیام فقط بودجه را تغییر می‌دهد «refine»، فقط شعاع را می‌گوید «change_radius»، و فقط محله را می‌گوید «change_location» است. متن دارای محصول تازه «new_search» است.
+نمونه‌ها: «بالای ۱۰ میلیون هم بگرد» → refine؛ «۵ کیلومتر» → change_radius؛ «هدفون سونی می‌خوام فردوسی» → new_search با brand=سونی و area=فردوسی.
+confidence را بین ۰ و ۱ بده. اطلاعات کالا/محله/برند را حدس نزن."""
+
+
+def router_messages(text: str, state: dict) -> list[dict]:
+    slots = state.get("slots") or {}
+    compact = {
+        "message": str(text or "")[:200],
+        "slots": {
+            key: slots.get(key)
+            for key in ("query", "category", "brand", "keywords", "budget_min", "budget_max", "location", "radius_km")
+            if slots.get(key) is not None
+        },
+        "last_query": slots.get("query") or state.get("last_query"),
+        "summary_bar": state.get("summary_bar") or {},
+        "history": [
+            {"role": item.get("role"), "content": str(item.get("content") or "")[:200]}
+            for item in (state.get("messages") or [])[-4:]
+            if item.get("role") in {"user", "assistant"}
+        ],
+    }
+    return [
+        {"role": "system", "content": ROUTER_SYSTEM},
+        {"role": "user", "content": json.dumps(compact, ensure_ascii=False)},
     ]

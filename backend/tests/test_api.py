@@ -150,7 +150,7 @@ def test_out_of_catalog(client):
     # QA2: the header term is stripped of the request sentence
     assert ooc["query"] == "زعفران و ادویه فله"
     assert "میخوام" not in ooc["query"]
-    assert ooc["tips_label"] == "اطلاعات عمومی، نه از داده‌های ترب"
+    assert ooc["tips_label"] == "پیشنهاد عمومی — خارج از دیتاست ترب"
     for tip in ooc["tips"]:
         assert "تومان" not in tip
 

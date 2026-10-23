@@ -7,9 +7,11 @@ general shopping tips - clearly labelled as «اطلاعات عمومی، نه �
 
 from __future__ import annotations
 
+import json
 import re
+from pathlib import Path
 
-from ..normalize import jaccard, normalize, trigrams
+from ..normalize import ACCESSORY_WORDS, CATEGORY_SYNONYMS, jaccard, normalize, tokenize, trigrams
 from .catalog import all_category_names, products_in_category
 from .markets import external_markets
 
@@ -76,6 +78,28 @@ def _tokens(text: str) -> set[str]:
     return tokens
 
 
+def tehran_market_whitelist() -> dict[str, dict]:
+    path = Path(__file__).resolve().parents[1] / "data" / "tehran_markets.json"
+    try:
+        entries = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return {
+        str(item["market_id"]): item
+        for item in entries
+        if item.get("market_id") and item.get("name_fa") and item.get("center")
+    }
+
+
+def whitelisted_market(market_id: str | None) -> dict | None:
+    if not market_id:
+        return None
+    for item in tehran_market_whitelist().values():
+        if market_id == item["market_id"] or market_id in item.get("aliases", []):
+            return dict(item)
+    return None
+
+
 def clean_query(query: str) -> str:
     """Normalize text and drop filler words (no trigrams yet)."""
     normalized = normalize(query)
@@ -136,6 +160,12 @@ def _category_candidates(query: str, market: dict | None) -> list[str]:
         return []
     query_tri = trigrams(cleaned)
     query_tokens = _tokens(cleaned)
+    normalized_query = normalize(cleaned)
+    preferred_category: str | None = None
+    for synonym, category in sorted(CATEGORY_SYNONYMS.items(), key=lambda item: len(normalize(item[0])), reverse=True):
+        if normalize(synonym) and normalize(synonym) in normalized_query:
+            preferred_category = category
+            break
     scored: list[tuple[float, str]] = []
     for category in all_category_names():
         category_tokens = _tokens(category)
@@ -143,6 +173,8 @@ def _category_candidates(query: str, market: dict | None) -> list[str]:
         token_score = len(shared) / max(1, len(query_tokens))
         tri_score = jaccard(query_tri, trigrams(category))
         score = max(tri_score, token_score)
+        if category == preferred_category:
+            score += 2.0
         if category in related:
             # curated relation: keep it even when the words are different
             scored.append((1.0 + score, category))
@@ -172,30 +204,49 @@ def find_alternatives(query: str, market: dict | None = None, limit: int = 3) ->
     """
     alternatives: list[dict] = []
     seen: set[str] = set()
+    title_indexes: dict[str, int] = {}
+    query_tokens = set(tokenize(query))
     for category in _category_candidates(query, market):
         products = sorted(
             products_in_category(category, limit=6),
             key=lambda item: (-(item.get("n_shops") or 0), item.get("min_price") or 0),
         )
         for product in products:
+            title = str(product.get("persian_title") or "")
+            title_tokens = set(tokenize(title))
+            if any(
+                not _phrase_in_tokens(query_tokens, word) and _phrase_in_tokens(title_tokens, word)
+                for word in ACCESSORY_WORDS
+            ):
+                continue
             if product["product_id"] in seen:
                 continue
             seen.add(product["product_id"])
-            alternatives.append(
-                {
-                    "product_id": product["product_id"],
-                    "persian_title": product.get("persian_title"),
-                    "brand_name": product.get("brand_name"),
-                    "category_name": product.get("category_name"),
-                    "image": product.get("image_first"),
-                    "min_price": product.get("min_price"),
-                    "n_shops": product.get("n_shops"),
-                    "offers": product.get("n_shops") or 0,
-                }
-            )
-            if len(alternatives) >= limit:
-                return alternatives
+            title_key = normalize(product.get("persian_title") or "")
+            title_key = "".join(re.sub(r"\d+", "", token) for token in tokenize(title_key))
+            title_key = f"{normalize(category)}|{title_key}"
+            candidate = {
+                "product_id": product["product_id"],
+                "persian_title": product.get("persian_title"),
+                "brand_name": product.get("brand_name"),
+                "category_name": product.get("category_name"),
+                "image": product.get("image_first"),
+                "min_price": product.get("min_price"),
+                "n_shops": product.get("n_shops"),
+                "offers": product.get("n_shops") or 0,
+            }
+            duplicate_index = title_indexes.get(title_key)
+            if duplicate_index is None:
+                title_indexes[title_key] = len(alternatives)
+                alternatives.append(candidate)
+            elif (candidate.get("min_price") or 0) < (alternatives[duplicate_index].get("min_price") or 0):
+                alternatives[duplicate_index] = candidate
     return alternatives[:limit]
+
+
+def _phrase_in_tokens(tokens: set[str], phrase: str) -> bool:
+    words = tokenize(phrase)
+    return bool(words) and all(word in tokens for word in words)
 
 
 GENERIC_TIPS = [
@@ -220,6 +271,30 @@ def sanitize_tips(tips: list[str]) -> list[str]:
                 continue
         clean.append(tip.strip())
     return clean[:4]
+
+
+def sanitize_guide_tips(tips: list[str], shop_names: list[str] | None = None) -> list[str]:
+    """Conservative guardrail for generic OOC advice (no numbers/shops/addresses)."""
+    known_shops = [normalize(name) for name in (shop_names or []) if len(normalize(name)) >= 3]
+    market_terms = [
+        normalize(name)
+        for item in tehran_market_whitelist().values()
+        for name in (item.get("name_fa"), *(item.get("aliases") or []))
+        if name
+    ]
+    safe: list[str] = []
+    for tip in tips:
+        if not isinstance(tip, str) or not tip.strip():
+            continue
+        normalized = normalize(tip)
+        if re.search(r"\d", normalize(tip)) or MONEY_RE.search(normalized) or PHONE_RE.search(normalized):
+            continue
+        if any(term in normalized for term in ("خیابان", "کوچه", "پلاک", "نشانی", "آدرس", "فروشگاه «", "مغازهٔ «")):
+            continue
+        if any(name in normalized for name in known_shops + market_terms):
+            continue
+        safe.append(tip.strip())
+    return safe[:3]
 
 
 def fallback_message(query: str, market: dict | None) -> str:

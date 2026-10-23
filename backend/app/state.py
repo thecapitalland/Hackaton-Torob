@@ -6,7 +6,7 @@ import operator
 from typing import Annotated, Literal, Optional, TypedDict
 
 Phase = Literal["discover", "recommend", "stores", "verify", "trip", "done", "out_of_catalog", "compare"]
-Action = Literal["chat", "select_product", "verify", "trip", "set_location"]
+Action = Literal["chat", "select_product", "verify", "trip", "set_location", "set_radius"]
 
 
 class Slots(TypedDict, total=False):
@@ -14,11 +14,14 @@ class Slots(TypedDict, total=False):
 
     query: str
     category: Optional[str]
+    brand: Optional[str]
     keywords: list[str]
     budget_max: Optional[int]
     budget_min: Optional[int]
     location: Optional[dict]  # {"label": "میدان فردوسی", "lat": 35.7010, "lon": 51.4187}
     location_skipped: bool
+    radius_km: Optional[int]
+    accessory_request: bool
     budget_skipped: bool
     payment_in_person: bool
     installment: bool
@@ -111,6 +114,7 @@ class AgentState(TypedDict, total=False):
     compare: Optional[dict]
     trip: Optional[dict]
     trace: Annotated[list[dict], operator.add]
+    decision: Optional[dict]
     phase: Phase
     # per-request input fields (overwritten on every invocation)
     action: Action
@@ -119,3 +123,4 @@ class AgentState(TypedDict, total=False):
     shop_ids: list[str]
     sort: str
     location: Optional[dict]
+    radius_km: Optional[int]

@@ -39,6 +39,9 @@ def reset_conn() -> None:
         if _CONN is not None:
             _CONN.close()
         _CONN = None
+    all_brands.cache_clear()
+    all_shop_names.cache_clear()
+    brands_in_category.cache_clear()
 
 
 def _rows(cursor: sqlite3.Cursor) -> list[dict]:
@@ -70,6 +73,43 @@ def all_category_names() -> list[str]:
     except sqlite3.Error:
         return []
     return [row["name"] for row in rows]
+
+
+@lru_cache(maxsize=1)
+def all_brands() -> list[str]:
+    """Distinct catalog brands used for deterministic brand extraction/guards."""
+    try:
+        rows = get_conn().execute(
+            "SELECT DISTINCT brand_name FROM products "
+            "WHERE brand_name IS NOT NULL AND TRIM(brand_name) != ''"
+        ).fetchall()
+    except sqlite3.Error:
+        return []
+    return sorted({str(row["brand_name"]).strip() for row in rows if row["brand_name"]})
+
+
+@lru_cache(maxsize=1)
+def all_shop_names() -> list[str]:
+    try:
+        rows = get_conn().execute(
+            "SELECT DISTINCT name FROM shops WHERE name IS NOT NULL AND TRIM(name) != ''"
+        ).fetchall()
+    except sqlite3.Error:
+        return []
+    return [str(row["name"]).strip() for row in rows if row["name"]]
+
+
+@lru_cache(maxsize=256)
+def brands_in_category(category: str) -> list[str]:
+    try:
+        rows = get_conn().execute(
+            "SELECT DISTINCT brand_name FROM products "
+            "WHERE category_name = ? AND brand_name IS NOT NULL AND TRIM(brand_name) != ''",
+            (category,),
+        ).fetchall()
+    except sqlite3.Error:
+        return []
+    return sorted({str(row["brand_name"]).strip() for row in rows if row["brand_name"]})
 
 
 def category_stats() -> list[dict]:

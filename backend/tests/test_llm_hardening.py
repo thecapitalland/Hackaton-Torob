@@ -93,7 +93,7 @@ def test_response_format_variant_is_used_only_for_its_400_error(monkeypatch):
 
 def test_clarify_chips_always_come_from_rules(monkeypatch):
     class FakeClient:
-        def chat_json(self, _messages):
+        def chat_json(self, _messages, **_kwargs):
             return {"text": "محله‌ات را بنویس", "chips": ["تهران", "اصفهان", "ساری"]}
 
     monkeypatch.setattr(graph, "get_client", lambda: FakeClient())
@@ -135,7 +135,7 @@ def test_rules_keep_saffron_out_of_catalog_despite_llm_claim(monkeypatch):
 
 def test_invented_compare_number_falls_back_to_computed_template(monkeypatch):
     class FakeClient:
-        def chat_json(self, _messages):
+        def chat_json(self, _messages, **_kwargs):
             return {
                 "verdict": "گزینهٔ هدفون با ۹۹۹٬۰۰۰ تومان ارزان‌تر است.",
                 "checklist": ["فاکتور رسمی", "گارانتی را بررسی کن", "کالا را تست کن"],
@@ -151,7 +151,7 @@ def test_invented_compare_number_falls_back_to_computed_template(monkeypatch):
 
 def test_unsupported_warranty_or_quality_claim_falls_back(monkeypatch):
     class FakeClient:
-        def chat_json(self, _messages):
+        def chat_json(self, _messages, **_kwargs):
             return {
                 "verdict": "این مدل کیفیت بهتری دارد و گارانتی اصلی دارد.",
                 "checklist": ["فاکتور رسمی", "ضمانت را بررسی کن", "کالا را تست کن"],

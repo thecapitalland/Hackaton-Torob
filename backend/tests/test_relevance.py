@@ -26,6 +26,10 @@ def test_core_noun_and_spelling_aliases():
     assert rules.core_noun("هدفون تا ۳ میلیون") == "هدفون"
     assert rules.core_noun("گوشی سامسونگ") == "گوشی"
     assert rules.core_noun("گوشی موبایل", "گوشی موبایل") == "گوشی"
+    assert rules.core_noun("شارژر لپتاپ") == "شارژر"
+    assert rules.core_noun("یخچال ساید") == "یخچال"
+    assert rules.core_noun("مانیتور") == "مانیتور"
+    assert rules.detect_category("شارژر لپتاپ ایسوس", ["شارژر لپ تاپ"]) == "شارژر لپ تاپ"
 
 
 def test_kafsh_ketooni_returns_three_relevant_shoe_cards(catalog_path):
@@ -93,3 +97,34 @@ def test_headphones_and_samsung_phones_remain_relevant(catalog_path):
             if expected_brand:
                 assert expected_brand in normalize(f"{item.get('brand_name') or ''} {card['title']}")
             assert not _has_unrequested_accessory(card["title"], query)
+
+
+def test_refrigerator_search_excludes_filters_stabilizers_and_protectors(catalog_path):
+    candidates, cards = _recommend("یخچال")
+    assert cards
+    forbidden = {"فیلتر", "استابلایزر", "ترانس", "رگولاتور", "محافظ"}
+    for item in [*candidates, *cards]:
+        title = item.get("persian_title") or item.get("title") or ""
+        assert not (forbidden & set(tokenize(title)))
+
+
+def test_laptop_charger_keeps_charger_as_core_noun(catalog_path):
+    candidates, cards = _recommend("شارژر لپتاپ")
+    assert cards
+    assert all(item["category_name"] == "شارژر لپ تاپ" for item in candidates)
+    slots = {**graph._rule_extract("شارژر لپتاپ"), "query": "شارژر لپتاپ"}
+    state = {"slots": slots, "text": "شارژر لپتاپ"}
+    state.update(graph.search(state))
+    assert graph.route_after_search(state) == "recommend"
+
+
+def test_plain_monitor_defaults_to_computer_monitor_category(catalog_path):
+    candidates, cards = _recommend("مانیتور")
+    assert cards
+    assert all(item["category_name"] == "مانیتور" for item in candidates)
+
+
+def test_headphone_candidates_have_no_normalized_duplicate_titles(catalog_path):
+    candidates, _cards = _recommend("هدفون بلوتوثی")
+    keys = [graph._normalized_title_key(item) for item in candidates]
+    assert len(keys) == len(set(keys))

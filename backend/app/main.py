@@ -11,7 +11,7 @@ import os
 import secrets
 import sqlite3
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
@@ -20,7 +20,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.types import Command
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
 load_dotenv()
@@ -33,9 +33,11 @@ from .data_static import (  # noqa: E402
 )
 from . import graph as graph_module  # noqa: E402
 from .graph import build_graph  # noqa: E402
+from .decision import Decision  # noqa: E402
 from . import rules  # noqa: E402
 from . import normalize as normalize_utils  # noqa: E402
-from .llm import get_client  # noqa: E402
+from .llm import get_client, llm_budget  # noqa: E402
+from . import llm_cost  # noqa: E402
 from .services import neshan as neshan_service  # noqa: E402
 from .tools import cafes as cafes_tool  # noqa: E402
 from .tools import catalog, markets  # noqa: E402
@@ -104,6 +106,26 @@ class ChatIn(BaseModel):
     location: GeoOrigin | None = None
 
 
+class ChatResponse(BaseModel):
+    """Typed public chat payload; extra response cards remain backward compatible."""
+    model_config = ConfigDict(extra="allow")
+    session_id: str
+    phase: str
+    messages: list[dict] = Field(default_factory=list)
+    pending: dict | None = None
+    trace: list[dict] = Field(default_factory=list)
+    slots: dict = Field(default_factory=dict)
+    decision: Decision | None = None
+    cards: list[dict] | None = None
+    more: list[dict] | None = None
+    mode: str | None = None
+    compare: dict | None = None
+    ooc: dict | None = None
+    product: dict | None = None
+    shops: list[dict] | None = None
+    trip: dict | None = None
+
+
 class ResumeIn(BaseModel):
     session_id: str
     value: Any = None
@@ -140,6 +162,11 @@ class LocationIn(BaseModel):
     label: str = "موقعیت فعلی شما"
     lat: float
     lon: float
+
+
+class RadiusIn(BaseModel):
+    session_id: str
+    radius_km: Literal[2, 5, 10] | None
 
 
 class GeoDestination(BaseModel):
@@ -193,6 +220,7 @@ def _base_payload(session_id: str, values: dict, before: dict, pending: dict | N
         "pending": pending,
         "trace": trace[before.get("trace", 0) :],
         "slots": values.get("slots") or {},
+        "decision": values.get("decision"),
     }
 
 
@@ -254,14 +282,18 @@ def _chat_answers_question(question: dict, text: str) -> bool:
 
 async def _invoke(session_id: str, payload: dict) -> Any:
     graph = get_graph()
-    return await run_in_threadpool(graph.invoke, payload, config_for(session_id))
+    budget_s = float(os.environ.get("MESSAGE_BUDGET_S", "8"))
+    with llm_budget(max_calls=2, timeout_s=budget_s):
+        return await run_in_threadpool(graph.invoke, payload, config_for(session_id))
 
 
 async def _resume(session_id: str, value: Any) -> Any:
     graph = get_graph()
-    return await run_in_threadpool(
-        graph.invoke, Command(resume=value), config_for(session_id)
-    )
+    budget_s = float(os.environ.get("MESSAGE_BUDGET_S", "8"))
+    with llm_budget(max_calls=2, timeout_s=budget_s):
+        return await run_in_threadpool(
+            graph.invoke, Command(resume=value), config_for(session_id)
+        )
 
 
 # --------------------------------------------------------------------------
@@ -295,6 +327,14 @@ async def health() -> dict:
 async def health_alias() -> dict:
     """Alias for external pings that hit /health instead of /api/health."""
     return await health()
+
+
+@app.get("/api/debug/llm-stats")
+async def debug_llm_stats() -> dict:
+    """In-memory aggregate only; keep the diagnostics endpoint opt-in."""
+    if os.environ.get("DEBUG") != "1":
+        raise HTTPException(status_code=404, detail="Not found")
+    return llm_cost.stats()
 
 
 @app.get("/api/geo/reverse")
@@ -335,7 +375,7 @@ async def geo_search(q: str = "") -> dict:
     return {"results": results}
 
 
-@app.post("/api/location")
+@app.post("/api/location", response_model=ChatResponse)
 async def update_location(body: LocationIn) -> dict:
     """Change the origin in the current session and re-rank its selected model."""
     before = _state_snapshot(body.session_id)
@@ -355,6 +395,27 @@ async def update_location(body: LocationIn) -> dict:
     payload["shops"] = values.get("shops") or []
     payload["map_center"] = _map_center(payload["shops"])
     payload["specialty_market"] = values.get("specialty_market")
+    return payload
+
+
+@app.post("/api/radius", response_model=ChatResponse)
+async def update_radius(body: RadiusIn) -> dict:
+    """Re-run the current result flow with the requested radius slot."""
+    before = _state_snapshot(body.session_id)
+    values_before = before.get("values") or {}
+    product_id = values_before.get("selected_product_id") or (values_before.get("product") or {}).get("product_id")
+    result = await _invoke(
+        body.session_id,
+        {"action": "set_radius", "radius_km": body.radius_km, "product_id": product_id},
+    )
+    pending = _extract_pending(result)
+    values = (result or {}).get("values") or _state_snapshot(body.session_id)["values"]
+    payload = _base_payload(body.session_id, values, before, pending)
+    payload["cards"] = values.get("cards") or []
+    payload["more"] = values.get("more") or []
+    payload["specialty_market"] = values.get("specialty_market")
+    payload["product"] = values.get("product")
+    payload["shops"] = values.get("shops") or []
     return payload
 
 
@@ -428,7 +489,7 @@ async def new_session() -> dict:
     return {"session_id": "s_" + secrets.token_hex(2)}
 
 
-@app.post("/api/chat")
+@app.post("/api/chat", response_model=ChatResponse)
 async def chat(body: ChatIn) -> Any:
     if not body.text.strip():
         return _error("BAD_REQUEST", "پیام خالی است.")
@@ -495,7 +556,7 @@ async def _resume_and_respond(session_id: str, value: Any) -> Any:
     return payload
 
 
-@app.post("/api/resume")
+@app.post("/api/resume", response_model=ChatResponse)
 async def resume(body: ResumeIn) -> Any:
     return await _resume_and_respond(body.session_id, body.value)
 

@@ -18,6 +18,7 @@ hours, distances - comes from the catalog through the tools.
 from __future__ import annotations
 
 import json
+import re
 import time
 from datetime import datetime
 from itertools import product as cartesian_product
@@ -25,10 +26,11 @@ from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from . import decision as decision_module
 from . import prompts, rules
-from .llm import get_client
+from .llm import get_client, llm_node
 from .normalize import (
     ACCESSORY_CATEGORIES,
     ACCESSORY_WORDS,
@@ -115,6 +117,14 @@ class OocOut(BaseModel):
     tips: list[str] = Field(default_factory=list)
 
 
+class OocGuideOut(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    category_guess: str | None = None
+    tips: list[str] = Field(default_factory=list, max_length=3)
+    markets: list[str] = Field(default_factory=list, max_length=4)
+    brands_generic: list[str] = Field(default_factory=list, max_length=3)
+
+
 class HaggleOut(BaseModel):
     lines: list[str] = Field(default_factory=list)
 
@@ -147,7 +157,12 @@ def _short(value: str, limit: int = 42) -> str:
 
 
 def _known_categories() -> list[str]:
-    return catalog.list_categories(limit=80)
+    return catalog.all_category_names()
+
+
+def _chat_json(node: str, messages: list[dict], **kwargs) -> dict | None:
+    with llm_node(node):
+        return get_client().chat_json(messages, **kwargs)
 
 
 def _resolve_location(label: str | None) -> dict | None:
@@ -162,18 +177,60 @@ def _resolve_location(label: str | None) -> dict | None:
     return None
 
 
+def decide(state: AgentState) -> dict:
+    """Run the typed action router before slot understanding/search."""
+    started = time.time()
+    current_slots = state.get("slots") or {}
+    router_state = dict(state)
+    router_state["summary_bar"] = {
+        key: current_slots.get(key)
+        for key in ("category", "brand", "budget_min", "budget_max", "location", "radius_km")
+        if current_slots.get(key) is not None
+    }
+    decision = decision_module.decide(
+        state.get("text") or "",
+        router_state,
+        _known_categories(),
+        catalog.all_brands(),
+    )
+    return {
+        "decision": decision.model_dump(mode="json"),
+        # A non-resume chat is a new turn; only the clarify node should set
+        # last_question while the graph is resuming the current turn.
+        "last_question": None,
+        "trace": [
+            _trace(
+                "decide",
+                f"{decision.source} · {decision.intent.action}",
+                started,
+            )
+        ],
+    }
+
+
+def chitchat(state: AgentState) -> dict:
+    text = state.get("text") or ""
+    return {
+        "phase": "discover",
+        "messages": [{"role": "assistant", "content": rules.chitchat_reply(text)}],
+    }
+
+
 def _merge_slots(current: dict, extracted: dict) -> dict:
     """Merge a fresh extraction into the known slots (never erase a value)."""
     slots = dict(current or {})
     for key in (
         "category",
+        "brand",
         "budget_max",
         "budget_min",
+        "radius_km",
         "keywords",
         "payment_in_person",
         "installment",
         "today",
         "in_torob",
+        "accessory_request",
     ):
         value = extracted.get(key)
         if value in (None, [], ""):
@@ -230,15 +287,18 @@ def _rule_extract(text: str) -> dict:
     categories = _known_categories()
     budget_max, budget_min = rules.parse_budget(text)
     category = rules.detect_category(text, categories)
+    brand = rules.detect_brand(text, catalog.all_brands())
     location = rules.detect_location(text)
     stop_words = [location["label"]] if location else []
     keywords = rules.extract_keywords(text, category, stop_words)
     return {
         "category": category,
+        "brand": brand,
         "keywords": keywords,
         "budget_max": budget_max,
         "budget_min": budget_min,
         "location": location,
+        "radius_km": rules.detect_radius(text)[1] if rules.detect_radius(text)[0] else None,
         "installment": rules.detect_installment(text),
         "today": rules.detect_today(text),
         "in_torob": rules.detect_in_torob(text),
@@ -272,7 +332,6 @@ def _clean_keywords(keywords: list[str] | None, location: dict | None) -> list[s
 
 
 def _llm_extract(text: str, history: list[dict], current_slots: dict, last_question: str | None = None) -> dict:
-    client = get_client()
     payload = {
         "message": text,
         "history": [
@@ -283,7 +342,10 @@ def _llm_extract(text: str, history: list[dict], current_slots: dict, last_quest
         "last_question": last_question,
         "current_slots": current_slots,
     }
-    raw = client.chat_json(prompts.understand_messages(payload))
+    raw = _chat_json(
+        "understand", prompts.understand_messages(payload),
+        response_validator=UnderstandOut.model_validate,
+    )
     if not raw:
         return {}
     try:
@@ -309,27 +371,59 @@ def understand(state: AgentState) -> dict:
     text = state.get("text") or ""
     history = state.get("messages") or []
     current = state.get("slots") or {}
+    decision_data = state.get("decision") or {}
+    intent_data = decision_data.get("intent") or {}
+    decision_action = intent_data.get("action") or ""
 
-    # Always run deterministic rules. They win on facts that affect routing
-    # and catalog filters; the LLM may only fill gaps in phrasing/keywords.
     rule_extracted = _rule_extract(text)
-    llm_extracted = _llm_extract(text, history, current, state.get("last_question"))
-    extracted = dict(llm_extracted or {})
-    for key in ("category", "location"):
-        if rule_extracted.get(key) is not None:
-            extracted[key] = rule_extracted[key]
-    if rule_extracted.get("budget_max") is not None or rule_extracted.get("budget_min") is not None:
-        extracted["budget_max"] = rule_extracted.get("budget_max")
-        extracted["budget_min"] = rule_extracted.get("budget_min")
-    # Scope is a routing decision, never an LLM decision.
-    extracted["in_torob"] = rule_extracted["in_torob"]
-    for key in ("installment", "today", "compare"):
-        if rule_extracted.get(key) is not None:
-            extracted[key] = rule_extracted[key]
-    if rule_extracted.get("keywords"):
-        extracted["keywords"] = rule_extracted["keywords"]
+    if decision_data:
+        # The router already made the one action call for this user turn.
+        # Jev's only slot facts are deterministic rules; chat-wire values have
+        # already passed the typed guard in decision.py.
+        extracted = dict(rule_extracted)
+        if intent_data.get("action") == "compare":
+            extracted["compare"] = intent_data.get("sides")
+        for key in ("category", "brand", "budget_min", "budget_max", "radius_km"):
+            if intent_data.get(key) is not None:
+                extracted[key] = intent_data[key]
+        area = intent_data.get("area")
+        if area:
+            extracted["location"] = _resolve_location(area) or rules.detect_location(area)
+        if intent_data.get("action") == "change_radius":
+            # None is an explicit «کل تهران» and must clear an older radius.
+            extracted["radius_km"] = intent_data.get("radius_km")
+        if (
+            decision_action == "refine"
+            and not rule_extracted.get("category")
+            and not rules.core_noun(text, None)
+        ):
+            # Budget/location wording is not a product keyword. Keep only an
+            # explicitly detected brand when refining the existing query.
+            extracted["keywords"] = [extracted["brand"]] if extracted.get("brand") else []
+        if intent_data.get("clear_budget_max"):
+            extracted["budget_max"] = None
+            extracted["budget_min"] = intent_data.get("budget_min") or extracted.get("budget_min")
+        if decision_data.get("accessory_request"):
+            extracted["accessory_request"] = True
     else:
-        extracted.setdefault("keywords", [])
+        # Direct node invocations used by tests/tools keep the P0 rule-first
+        # extraction behavior, without requiring a preceding decide node.
+        llm_extracted = _llm_extract(text, history, current, state.get("last_question"))
+        extracted = dict(llm_extracted or {})
+        for key in ("category", "location", "brand"):
+            if rule_extracted.get(key) is not None:
+                extracted[key] = rule_extracted[key]
+        if rule_extracted.get("budget_max") is not None or rule_extracted.get("budget_min") is not None:
+            extracted["budget_max"] = rule_extracted.get("budget_max")
+            extracted["budget_min"] = rule_extracted.get("budget_min")
+        extracted["in_torob"] = rule_extracted["in_torob"]
+        for key in ("installment", "today", "compare", "radius_km"):
+            if rule_extracted.get(key) is not None:
+                extracted[key] = rule_extracted[key]
+        if rule_extracted.get("keywords"):
+            extracted["keywords"] = rule_extracted["keywords"]
+        else:
+            extracted.setdefault("keywords", [])
 
     # FIX4-P1: a comparison turn must not poison the shopping slots.  The
     # side names and the wording of «X یا Y کدوم بهتره؟» (کدوم، بهتره ...)
@@ -354,6 +448,21 @@ def understand(state: AgentState) -> dict:
             for key, value in (current or {}).items()
             if key not in ("query", "keywords", "category", "compare")
         }
+    if (
+        decision_action == "new_search"
+        and not state.get("last_question")
+        and rules.parse_budget(text) == (None, None)
+        and (current.get("budget_max") is not None or current.get("budget_min") is not None)
+    ):
+        # A new product/brand search does not silently inherit a stale price
+        # ceiling from the previous product. Treat that old filter as skipped
+        # rather than immediately asking the user to repeat a budget.
+        current = {
+            key: value
+            for key, value in current.items()
+            if key not in ("budget_max", "budget_min", "budget_skipped")
+        }
+        current["budget_skipped"] = True
     slots = _merge_slots(current, extracted)
 
     # A newly typed budget replaces the previous budget constraint. In
@@ -368,6 +477,18 @@ def understand(state: AgentState) -> dict:
         slots["budget_min"] = turn_budget_min
         slots["budget_max"] = None
         slots["budget_skipped"] = False
+    if decision_action == "change_radius":
+        slots["radius_km"] = intent_data.get("radius_km")
+    if intent_data.get("clear_budget_max"):
+        slots["budget_max"] = None
+        slots["budget_min"] = intent_data.get("budget_min") or slots.get("budget_min")
+        if (
+            decision_action == "refine"
+            and intent_data.get("brand")
+            and normalize(intent_data["brand"]) != normalize((current or {}).get("brand") or "")
+            and rules.parse_budget(text) == (None, None)
+        ):
+            slots["budget_skipped"] = True
 
     # Update #1: a GPS position from the client fills an empty location slot,
     # but an explicit text location above always wins.
@@ -392,12 +513,19 @@ def understand(state: AgentState) -> dict:
     slot_only = bool(rules.slot_ack(text)) and not residual
     fresh = (
         not is_compare_turn
+        and decision_action != "refine"
         and not slot_only
         and not rules.is_refinement_text(text)
         and bool(extracted.get("category") or extracted.get("keywords"))
     )
+    if decision_action == "new_search" and not is_compare_turn:
+        fresh = True
     if fresh:
-        slots["query"] = text
+        slots["query"] = (
+            str(intent_data.get("query") or text)
+            if decision_data and decision_action == "new_search"
+            else text
+        )
         slots["keywords"] = _clean_keywords(
             list(extracted.get("keywords") or []), slots.get("location")
         )
@@ -405,6 +533,9 @@ def understand(state: AgentState) -> dict:
         # category (e.g. «یخچال ساید» after «هدفون»); the category in the
         # current turn, if any, is the only one that may constrain it.
         slots["category"] = extracted.get("category")
+        slots["brand"] = extracted.get("brand")
+        if decision_data:
+            slots["accessory_request"] = bool(decision_data.get("accessory_request"))
     elif not slots.get("query") and not is_compare_turn:
         slots["query"] = text
     if slots.get("category") and slots["category"] in ACCESSORY_CATEGORIES:
@@ -459,9 +590,11 @@ def understand(state: AgentState) -> dict:
 
 def _llm_clarify(missing: list[str]) -> dict:
     fallback = rules.clarify_fallback(missing)
-    client = get_client()
     payload = {"missing": missing, "missing_text": " و ".join(missing)}
-    raw = client.chat_json(prompts.clarify_messages(payload))
+    raw = _chat_json(
+        "clarify", prompts.clarify_messages(payload),
+        response_validator=ClarifyOut.model_validate,
+    )
     if not raw:
         return fallback
     try:
@@ -572,7 +705,19 @@ def _requested_brand_groups(query: str) -> list[tuple[str, ...]]:
     for marker, aliases in BRAND_ALIASES.items():
         if _contains_phrase(query, marker) and aliases not in groups:
             groups.append(aliases)
+    for brand in catalog.all_brands():
+        normalized = normalize(brand)
+        group = (normalized,)
+        if normalized and _contains_phrase(query, normalized) and group not in groups:
+            groups.append(group)
     return groups
+
+
+def _normalized_title_key(item: dict) -> str:
+    title = str(item.get("persian_title") or item.get("title") or "")
+    tokens = [re.sub(r"\d+", "", token) for token in tokenize(title)]
+    tokens = [token for token in tokens if token]
+    return f"{normalize(item.get('category_name') or '')}|{' '.join(tokens)}"
 
 
 def _product_matches_relevance(
@@ -581,6 +726,7 @@ def _product_matches_relevance(
     category: str | None,
     core: str | None,
     brand_groups: list[tuple[str, ...]],
+    allow_accessories: bool = False,
 ) -> bool:
     title = str(item.get("persian_title") or "")
     # With an exact dataset category, the category itself guarantees the core
@@ -591,9 +737,10 @@ def _product_matches_relevance(
         return False
 
     title_tokens = set(tokenize(title))
-    for word in ACCESSORY_WORDS:
-        if not _contains_phrase(query, word) and _contains_phrase(title, word):
-            return False
+    if not allow_accessories:
+        for word in ACCESSORY_WORDS:
+            if not _contains_phrase(query, word) and _contains_phrase(title, word):
+                return False
 
     brand_text = " ".join(
         str(item.get(key) or "")
@@ -613,6 +760,7 @@ def _search_relevant_products(
     query: str,
     *,
     limit: int = 40,
+    allow_accessories: bool = False,
 ) -> tuple[list[dict], str | None]:
     """Run a relevance-preserving ladder; relax secondary terms, not the noun.
 
@@ -631,6 +779,7 @@ def _search_relevant_products(
             core=core,
             query=query,
             brand_groups=brand_groups,
+            allow_accessories=allow_accessories,
         ) or None
 
     attempts: list[tuple[list[str], str | None, int, str]] = []
@@ -655,7 +804,7 @@ def _search_relevant_products(
     )
 
     merged: list[dict] = []
-    seen: set[str] = set()
+    seen: dict[str, int] = {}
     for words, cat, min_shops, mode in attempts:
         variants = _keyword_variants(words)
         for variant in variants:
@@ -670,12 +819,25 @@ def _search_relevant_products(
             )
             for item in rows:
                 product_id = str(item.get("product_id") or "")
-                if not product_id or product_id in seen:
+                if not product_id:
                     continue
-                if not _product_matches_relevance(item, query, cat, core, brand_groups):
+                if not _product_matches_relevance(
+                    item, query, cat, core, brand_groups, allow_accessories
+                ):
                     continue
-                seen.add(product_id)
-                merged.append(item)
+                # «بالای N» is a minimum price, not a range-overlap hint:
+                # do not show a product whose visible starting price is below N.
+                if budget_min is not None and int(item.get("min_price") or 0) < budget_min:
+                    continue
+                title_key = _normalized_title_key(item)
+                old_index = seen.get(title_key)
+                if old_index is None:
+                    seen[title_key] = len(merged)
+                    merged.append(item)
+                else:
+                    previous = merged[old_index]
+                    if int(item.get("min_price") or 0) < int(previous.get("min_price") or 0):
+                        merged[old_index] = item
         merged.sort(key=lambda item: (-int(item.get("n_shops") or 0), int(item.get("min_price") or 0)))
         if len(merged) >= 3:
             break
@@ -687,12 +849,15 @@ def _search_with_fallback(slots: dict) -> tuple[list[dict], str]:
     keywords = list(slots.get("keywords") or [])
     category = slots.get("category")
     query = str(slots.get("query") or " ".join(keywords))
+    if slots.get("brand") and not _contains_phrase(query, str(slots["brand"])):
+        query = f"{query} {slots['brand']}".strip()
     products, selected_category = _search_relevant_products(
         keywords,
         category,
         slots.get("budget_max"),
         slots.get("budget_min"),
         query,
+        allow_accessories=bool(slots.get("accessory_request")),
     )
     if not products:
         return [], "نتیجه‌ای پیدا نشد"
@@ -728,7 +893,11 @@ def route_after_search(state: AgentState) -> str:
     if not slots.get("category") and not slots.get("keywords"):
         return "out_of_catalog"
     if float(state.get("top_search_score") or 0) < OOC_THRESHOLD:
-        return "out_of_catalog"
+        # A low lexical score is not enough to reject a known product noun:
+        # the search ladder has already applied its core-noun/accessory guard.
+        query = str(state.get("text") or slots.get("query") or "")
+        if not candidates or not rules.core_noun(query, slots.get("category")):
+            return "out_of_catalog"
     return "recommend"
 
 
@@ -779,7 +948,6 @@ def _card_warnings(product: dict) -> list[str]:
 
 
 def _llm_recommend(cards: list[dict], specialty: dict | None) -> dict:
-    client = get_client()
     payload = {
         "cards": [
             {
@@ -794,7 +962,10 @@ def _llm_recommend(cards: list[dict], specialty: dict | None) -> dict:
         ],
         "specialty_market": specialty,
     }
-    raw = client.chat_json(prompts.recommend_messages(payload))
+    raw = _chat_json(
+        "recommend", prompts.recommend_messages(payload),
+        response_validator=RecommendOut.model_validate,
+    )
     if not raw:
         return {}
     try:
@@ -911,63 +1082,111 @@ def out_of_catalog(state: AgentState) -> dict:
     query = ooc.product_term(raw_query)
     market = ooc.match_external_market(query)
     alternatives = ooc.find_alternatives(query, market)
-
-    client = get_client()
-    payload = {
+    whitelist = ooc.tehran_market_whitelist()
+    fallback_market = ooc.whitelisted_market((market or {}).get("market_id"))
+    category_candidates = ooc._category_candidates(query, market)
+    alternative_brands = sorted(
+        {str(item.get("brand_name")) for item in alternatives if item.get("brand_name")}
+    )
+    guide_payload = {
         "query": query,
-        "alternatives": [
-            {
-                "persian_title": item.get("persian_title"),
-                "category_name": item.get("category_name"),
-                "offers": item.get("offers"),
-            }
-            for item in alternatives
+        "category_candidates": category_candidates,
+        "alternative_categories": sorted(
+            {str(item.get("category_name")) for item in alternatives if item.get("category_name")}
+        ),
+        "market_whitelist": [
+            {"market_id": item["market_id"], "name_fa": item["name_fa"]}
+            for item in whitelist.values()
         ],
-        "market": market,
+        "brands_generic": alternative_brands,
     }
-    raw = client.chat_json(prompts.out_of_catalog_messages(payload))
-    message_fa = ""
-    tips: list[str] = []
+    raw = _chat_json(
+        "out_of_catalog",
+        prompts.ooc_guide_messages(guide_payload),
+        response_schema=OocGuideOut.model_json_schema(),
+        schema_name="ooc_guide",
+        response_validator=OocGuideOut.model_validate,
+    )
+
+    known_categories = set(catalog.all_category_names())
+    known_brands = {normalize(name): name for name in catalog.all_brands()}
+    guide_category = None
+    guide_tips: list[str] = []
+    guide_markets: list[str] = []
+    guide_brands: list[str] = []
     if raw:
         try:
-            parsed = OocOut(**raw)
-            message_fa = parsed.message_fa.strip()
-            tips = [str(tip) for tip in parsed.tips if str(tip).strip()]
+            parsed_guide = OocGuideOut(**raw)
+            if parsed_guide.category_guess in known_categories:
+                guide_category = parsed_guide.category_guess
+            guide_tips = ooc.sanitize_guide_tips(parsed_guide.tips, catalog.all_shop_names())
+            guide_markets = [
+                market_id for market_id in parsed_guide.markets if market_id in whitelist
+            ][:4]
+            guide_brands = [
+                known_brands[normalize(brand)]
+                for brand in parsed_guide.brands_generic
+                if normalize(brand) in known_brands
+            ][:3]
         except ValidationError:
-            message_fa = ""
-            tips = []
-    tips = ooc.sanitize_tips(tips)
-    if not message_fa:
-        message_fa = ooc.fallback_message(query, market)
-    if len(tips) < 3:
-        tips = (tips + ooc.market_tips(market) + ooc.GENERIC_TIPS)[:4]
+            pass
 
+    if not guide_category:
+        guide_category = (
+            (alternative_brands and alternatives[0].get("category_name"))
+            or (alternatives[0].get("category_name") if alternatives else None)
+            or ((market or {}).get("related_dataset_categories") or [None])[0]
+        )
+        if guide_category not in known_categories:
+            guide_category = None
+    if not guide_tips:
+        guide_tips = ooc.sanitize_guide_tips(ooc.GENERIC_TIPS, catalog.all_shop_names())
+    if not guide_markets and fallback_market:
+        guide_markets = [fallback_market["market_id"]]
+
+    # The sentence is a fixed fact statement, never generated by the LLM.
+    message_fa = (
+        "این کالا رو نداریم، ولی این‌ها نزدیکش هستن:"
+        if alternatives
+        else "این کالا رو نداریم."
+    )
+    selected_market = whitelist.get(guide_markets[0]) if guide_markets else fallback_market
     market_payload = None
-    if market:
-        center = market.get("center") or [None, None]
+    if selected_market:
+        center = selected_market.get("center") or (market or {}).get("center") or [None, None]
         market_payload = {
-            "market_id": market.get("market_id"),
-            "name_fa": market.get("name_fa"),
+            "market_id": selected_market["market_id"],
+            "name_fa": selected_market["name_fa"],
             "center": center,
             "center_approx": True,
-            "hours_external": market.get("hours_external") or {},
-            "hours_text": market_hours_text(market),
-            "sources": (market.get("hours_external") or {}).get("source") or market.get("sources") or [],
+            "hours_external": (market or {}).get("hours_external") or {},
+            "hours_text": market_hours_text(market) if market else None,
+            "sources": ((market or {}).get("hours_external") or {}).get("source") or [],
             "external": True,
             "route_url": neshan_link(center[0], center[1], 16),
         }
+    guide = {
+        "category_guess": guide_category,
+        "tips": guide_tips[:3],
+        "markets": guide_markets,
+        "brands_generic": guide_brands,
+    }
 
     payload_out = {
         "not_found": True,
         "query": query,
         "message_fa": message_fa,
         "alternatives": alternatives,
-        "tips": tips[:4],
-        "tips_label": "اطلاعات عمومی، نه از داده‌های ترب",
+        "tips": guide["tips"],
+        "tips_label": "پیشنهاد عمومی — خارج از دیتاست ترب",
         "market": market_payload,
+        "guide": guide,
     }
     return {
         "ooc": payload_out,
+        "cards": [],
+        "more": [],
+        "specialty_market": None,
         "phase": "out_of_catalog",
         "messages": [{"role": "assistant", "content": message_fa}],
         "trace": [_trace("out_of_catalog", f"«{query}» در داده‌ها نبود", started)],
@@ -1009,6 +1228,7 @@ def _dominant_category(
     core: str | None = None,
     query: str = "",
     brand_groups: list[tuple[str, ...]] | None = None,
+    allow_accessories: bool = False,
 ) -> str:
     """Mode of the category across a wider pool for brand-only searches.
 
@@ -1037,7 +1257,9 @@ def _dominant_category(
         pool = [
             item
             for item in pool
-            if _product_matches_relevance(item, query, None, core, brand_groups or [])
+            if _product_matches_relevance(
+                item, query, None, core, brand_groups or [], allow_accessories
+            )
         ]
     if not pool:
         return ""
@@ -1292,14 +1514,16 @@ def compare(state: AgentState) -> dict:
     fallback_checklist = list(_DEFAULT_CHECKLIST)
     verdict, checklist = fallback_verdict, fallback_checklist
 
-    client = get_client()
     payload = {
         "a": _compare_side_payload(side_a),
         "b": _compare_side_payload(side_b),
         "replica": bool(side_a["replica"] or side_b["replica"]),
         "near_radius_km": COMPARE_NEAR_M / 1_000,
     }
-    raw = client.chat_json(prompts.compare_messages(payload))
+    raw = _chat_json(
+        "compare", prompts.compare_messages(payload),
+        response_validator=CompareOut.model_validate,
+    )
     if raw:
         try:
             parsed = CompareOut(**raw)
@@ -1381,8 +1605,10 @@ def _sort_shops(options: list[dict], sort: str) -> list[dict]:
 
 
 def _llm_haggle_lines(payload: dict) -> list[str] | None:
-    client = get_client()
-    raw = client.chat_json(prompts.haggle_messages(payload))
+    raw = _chat_json(
+        "haggle", prompts.haggle_messages(payload),
+        response_validator=HaggleOut.model_validate,
+    )
     if not raw:
         return None
     try:
@@ -1464,6 +1690,16 @@ def set_location(state: AgentState) -> dict:
     return {"slots": slots, "location_update": location}
 
 
+def set_radius(state: AgentState) -> dict:
+    """Update radius without changing query, category, brand, or budget."""
+    radius = state.get("radius_km")
+    if radius not in {None, 2, 5, 10}:
+        return {}
+    slots = dict(state.get("slots") or {})
+    slots["radius_km"] = radius
+    return {"slots": slots}
+
+
 # --------------------------------------------------------------------------
 # verify: plan_contact -> approve_contact -> send -> collect -> parse -> rerank
 # --------------------------------------------------------------------------
@@ -1526,8 +1762,10 @@ def plan_contact(state: AgentState) -> dict:
         "installment": bool(slots.get("installment")),
         "today": bool(slots.get("today")),
     }
-    client = get_client()
-    raw = client.chat_json(prompts.plan_contact_messages(payload))
+    raw = _chat_json(
+        "plan_contact", prompts.plan_contact_messages(payload),
+        response_validator=PlanContactOut.model_validate,
+    )
     base = ""
     if raw:
         try:
@@ -1664,9 +1902,11 @@ def collect_replies(state: AgentState) -> dict:
 
 
 def _parse_one(raw: str, offer_price: int) -> dict:
-    client = get_client()
     payload = {"raw_reply": raw, "offer_price": offer_price}
-    parsed_raw = client.chat_json(prompts.parse_replies_messages(payload))
+    parsed_raw = _chat_json(
+        "parse_replies", prompts.parse_replies_messages(payload),
+        response_validator=ParseReplyOut.model_validate,
+    )
     if parsed_raw:
         try:
             parsed = ParseReplyOut(**parsed_raw).model_dump()
@@ -1837,7 +2077,6 @@ def build_trip(state: AgentState) -> dict:
         "قیمت نهایی را حضوری تأیید کن",
     ]
 
-    client = get_client()
     payload = {
         "stops": [
             {"name": stop["name"], "verified": stop["verified"], "walk_min_est": stop["walk_min_est"]}
@@ -1846,7 +2085,10 @@ def build_trip(state: AgentState) -> dict:
         "backup": backup.get("name") if backup else None,
         "cafe": cafe.get("name") if cafe else None,
     }
-    raw = client.chat_json(prompts.build_trip_messages(payload))
+    raw = _chat_json(
+        "build_trip", prompts.build_trip_messages(payload),
+        response_validator=TripOut.model_validate,
+    )
     summary = ""
     if raw:
         try:
@@ -1916,13 +2158,29 @@ def build_trip(state: AgentState) -> dict:
 
 def route_action(state: AgentState) -> str:
     action = state.get("action") or "chat"
-    if action in {"select_product", "verify", "trip", "chat", "set_location"}:
+    if action in {"select_product", "verify", "trip", "chat", "set_location", "set_radius"}:
         return action
     return "chat"
 
 
+def route_decision(state: AgentState) -> str:
+    intent = ((state.get("decision") or {}).get("intent") or {}).get("action")
+    if intent == "chitchat":
+        return "chitchat"
+    if intent == "haggle" and (state.get("selected_product_id") or state.get("product")):
+        return "plan_contact"
+    return "understand"
+
+
 def route_after_location(state: AgentState) -> str:
     return "find_stores" if (state.get("product_id") or state.get("selected_product_id")) else "end"
+
+
+def route_after_radius(state: AgentState) -> str:
+    if state.get("product_id") or state.get("selected_product_id"):
+        return "find_stores"
+    slots = state.get("slots") or {}
+    return "search" if (slots.get("query") or slots.get("category") or slots.get("keywords")) else "end"
 
 
 def route_understand(state: AgentState) -> str:
@@ -1945,6 +2203,8 @@ def route_understand(state: AgentState) -> str:
 def build_graph(checkpointer=None) -> Any:
     graph = StateGraph(AgentState)
 
+    graph.add_node("decide", decide)
+    graph.add_node("chitchat", chitchat)
     graph.add_node("understand", understand)
     graph.add_node("clarify", clarify)
     graph.add_node("search", search)
@@ -1953,6 +2213,7 @@ def build_graph(checkpointer=None) -> Any:
     graph.add_node("compare", compare)
     graph.add_node("find_stores", find_stores)
     graph.add_node("set_location", set_location)
+    graph.add_node("set_radius", set_radius)
     graph.add_node("plan_contact", plan_contact)
     graph.add_node("approve_contact", approve_contact)
     graph.add_node("send_messages", send_messages)
@@ -1966,13 +2227,21 @@ def build_graph(checkpointer=None) -> Any:
         START,
         route_action,
         {
-            "chat": "understand",
+            "chat": "decide",
             "select_product": "find_stores",
             "verify": "plan_contact",
             "trip": "build_trip",
             "set_location": "set_location",
+            "set_radius": "set_radius",
         },
     )
+
+    graph.add_conditional_edges(
+        "decide",
+        route_decision,
+        {"understand": "understand", "chitchat": "chitchat", "plan_contact": "plan_contact"},
+    )
+    graph.add_edge("chitchat", END)
 
     graph.add_conditional_edges(
         "understand",
@@ -1990,6 +2259,11 @@ def build_graph(checkpointer=None) -> Any:
     graph.add_edge("compare", END)
     graph.add_edge("find_stores", END)
     graph.add_conditional_edges("set_location", route_after_location, {"find_stores": "find_stores", "end": END})
+    graph.add_conditional_edges(
+        "set_radius",
+        route_after_radius,
+        {"find_stores": "find_stores", "search": "search", "end": END},
+    )
 
     graph.add_edge("plan_contact", "approve_contact")
     graph.add_conditional_edges(
