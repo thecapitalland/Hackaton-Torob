@@ -25,6 +25,7 @@ The flow starts with **“Where are you?”**: use GPS, type a neighbourhood, or
 - **Radius filters**: 2, 5 and 10 km, or all Tehran (the default), filter both shop results and the map. Empty radii offer a one-tap expansion.
 - **Editable search summary**: product, budget, neighbourhood and radius stay visible; natural-language budget/location edits keep the current session.
 - **Selective comparison**: select 2–4 product cards for a computed price range, median, seller count and visual “Agent analysis” verdict. The direct “X or Y?” path remains available.
+- **Relevance-preserving search**: the core product noun remains required as secondary filters relax, including the one-shop rung. Aliases such as `ketooni/katani` and `Nike/Nayki` are expanded; accessory titles (covers, waxers, insoles, etc.) are excluded unless the user asked for that accessory.
 - **Human in the loop**: no message is ever sent without a LangGraph `interrupt` approval; the user sees and
   can edit the exact message first.
 - **Transparent evidence instead of fake reviews**: a 0–5 “information completeness” meter with the signals
@@ -82,10 +83,21 @@ Reproducibility notes:
 - `build_markets.py` **overwrites** the committed `data/markets.json`; edit the curated
   `MARKET_DEFINITIONS` / `EXTERNAL_MARKETS` in the script, not just the JSON file.
 
-Later, add `BOXAPI_API_KEY` (+ optional `NESHAN_API_KEY`) to `.env`, run
-`python backend/scripts/smoke_llm.py` once to pick a working base_url/model,
-set `LLM_MODE=on` and restart. A missing Neshan key silently falls back
+To enable the LLM, set `BOXAPI_API_KEY` and `LLM_MODE=on`, then run
+`python backend/scripts/smoke_llm.py`. The smoke script contacts only the configured `BOXAPI_BASE_URL`;
+it never sends credentials to alternate hosts. A missing Neshan key silently falls back
 (approximate distance / local cafe list) — the app never breaks.
+
+### Optional OpenRouter configuration
+
+```dotenv
+BOXAPI_BASE_URL=https://openrouter.ai/api/v1
+LLM_MODEL=poolside/laguna-s-2.1:free
+LLM_MODEL_FALLBACK=google/gemma-4-31b-it:free
+```
+
+Free models have daily quotas and may return HTTP 429. The client shares one `LLM_TIMEOUT`
+deadline across at most two requests, tries the fallback model on failure, and then uses deterministic rules.
 
 ```bash
 # 2) backend (with keys)

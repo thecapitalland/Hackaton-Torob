@@ -310,9 +310,26 @@ def understand(state: AgentState) -> dict:
     history = state.get("messages") or []
     current = state.get("slots") or {}
 
-    extracted = _llm_extract(text, history, current, state.get("last_question"))
-    if not extracted:
-        extracted = _rule_extract(text)
+    # Always run deterministic rules. They win on facts that affect routing
+    # and catalog filters; the LLM may only fill gaps in phrasing/keywords.
+    rule_extracted = _rule_extract(text)
+    llm_extracted = _llm_extract(text, history, current, state.get("last_question"))
+    extracted = dict(llm_extracted or {})
+    for key in ("category", "location"):
+        if rule_extracted.get(key) is not None:
+            extracted[key] = rule_extracted[key]
+    if rule_extracted.get("budget_max") is not None or rule_extracted.get("budget_min") is not None:
+        extracted["budget_max"] = rule_extracted.get("budget_max")
+        extracted["budget_min"] = rule_extracted.get("budget_min")
+    # Scope is a routing decision, never an LLM decision.
+    extracted["in_torob"] = rule_extracted["in_torob"]
+    for key in ("installment", "today", "compare"):
+        if rule_extracted.get(key) is not None:
+            extracted[key] = rule_extracted[key]
+    if rule_extracted.get("keywords"):
+        extracted["keywords"] = rule_extracted["keywords"]
+    else:
+        extracted.setdefault("keywords", [])
 
     # FIX4-P1: a comparison turn must not poison the shopping slots.  The
     # side names and the wording of «X یا Y کدوم بهتره؟» (کدوم، بهتره ...)
@@ -441,22 +458,18 @@ def understand(state: AgentState) -> dict:
 
 
 def _llm_clarify(missing: list[str]) -> dict:
+    fallback = rules.clarify_fallback(missing)
     client = get_client()
     payload = {"missing": missing, "missing_text": " و ".join(missing)}
     raw = client.chat_json(prompts.clarify_messages(payload))
     if not raw:
-        return rules.clarify_fallback(missing)
+        return fallback
     try:
         parsed = ClarifyOut(**raw)
     except ValidationError:
-        return rules.clarify_fallback(missing)
-    chips = [str(chip) for chip in parsed.chips if str(chip).strip()][:3]
-    if not chips:
-        return rules.clarify_fallback(missing)
-    if chips[-1] != "مهم نیست":
-        chips[-1] = "مهم نیست"
-    text = parsed.text.strip() or rules.clarify_fallback(missing)["text"]
-    return {"text": text, "chips": chips}
+        return fallback
+    text = parsed.text.strip() or fallback["text"]
+    return {"text": text, "chips": fallback["chips"]}
 
 
 def _apply_clarify_answer(slot: str, answer: str, slots: dict) -> dict:
@@ -707,7 +720,8 @@ def search(state: AgentState) -> dict:
 def route_after_search(state: AgentState) -> str:
     candidates = state.get("candidates") or []
     slots = state.get("slots") or {}
-    if slots.get("in_torob") is False:
+    current_query = str(state.get("text") or slots.get("query") or "")
+    if not rules.detect_in_torob(current_query):
         return "out_of_catalog"
     if not candidates:
         return "out_of_catalog"
@@ -1283,6 +1297,7 @@ def compare(state: AgentState) -> dict:
         "a": _compare_side_payload(side_a),
         "b": _compare_side_payload(side_b),
         "replica": bool(side_a["replica"] or side_b["replica"]),
+        "near_radius_km": COMPARE_NEAR_M / 1_000,
     }
     raw = client.chat_json(prompts.compare_messages(payload))
     if raw:
@@ -1298,9 +1313,18 @@ def compare(state: AgentState) -> dict:
                 for key in ("min", "max", "median", "n_shops", "n_models", "n_near")
                 if side[key] is not None
             }
-            allowed.add(float(COMPARE_NEAR_M / 1_000))  # the «۵ کیلومتری» radius
+            allowed.add(float(payload["near_radius_km"]))
             text = " ".join([candidate_verdict, *candidate_checklist])
-            if candidate_verdict and candidate_checklist and haggle.numbers_in_text(text) <= allowed:
+            unsupported_claim = any(
+                word in normalize(candidate_verdict)
+                for word in ("گارانتی", "ضمانت", "کیفیت", "warranty", "guarantee", "quality")
+            )
+            if (
+                candidate_verdict
+                and candidate_checklist
+                and not unsupported_claim
+                and haggle.numbers_in_text(text) <= allowed
+            ):
                 verdict = candidate_verdict
                 checklist = candidate_checklist[:4]
         except (ValidationError, ValueError, TypeError):

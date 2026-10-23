@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 import threading
+import time
 from typing import Any
 
 from .data_static import llm_mode
@@ -24,7 +25,7 @@ class LLMClient:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._cache: dict[str, dict | None] = {}
+        self._cache: dict[str, dict] = {}
         self._client = None
         self.api_key = os.environ.get("BOXAPI_API_KEY", "")
         self.base_url = os.environ.get("BOXAPI_BASE_URL", "https://ai.boxapi.ir/api/v1")
@@ -65,50 +66,86 @@ class LLMClient:
             if key in self._cache:
                 return self._cache[key]
 
+        deadline = time.monotonic() + max(0.0, self.timeout)
+        models = [model]
+        if self.fallback_model and self.fallback_model != model:
+            models.append(self.fallback_model)
+
+        attempts = 0
         result: dict | None = None
-        try:
-            result = self._call(messages, model)
-        except Exception:
-            result = None
+        for candidate_model in models:
+            if attempts >= 2 or time.monotonic() >= deadline:
+                break
+            result, used = self._call(
+                messages,
+                candidate_model,
+                deadline=deadline,
+                attempts_left=2 - attempts,
+            )
+            attempts += used
+            if result is not None:
+                # Only successful JSON responses are cacheable. In particular,
+                # 429/timeouts must be retried on a later request.
+                with self._lock:
+                    self._cache[key] = result
+                return result
+        return None
 
-        if result is None and self.fallback_model and self.fallback_model != model:
-            try:
-                result = self._call(messages, self.fallback_model)
-            except Exception:
-                result = None
+    @staticmethod
+    def _is_response_format_error(exc: Exception) -> bool:
+        if getattr(exc, "status_code", None) != 400:
+            return False
+        details = " ".join(
+            str(value or "") for value in (exc, getattr(exc, "body", None), getattr(exc, "message", None))
+        ).lower()
+        return "response_format" in details or "response format" in details
 
-        with self._lock:
-            self._cache[key] = result
-        return result
+    def _call(
+        self,
+        messages: list[dict],
+        model: str,
+        *,
+        deadline: float,
+        attempts_left: int,
+    ) -> tuple[dict | None, int]:
+        """Make one request, retrying without response_format only on its 400.
 
-    def _call(self, messages: list[dict], model: str) -> dict | None:
+        The caller owns the shared two-request budget across primary/fallback.
+        """
         client = self._get_client()
+        attempts = 0
         variants: list[dict[str, Any]] = [
-            {"max_completion_tokens": 700, "response_format": {"type": "json_object"}},
-            {"max_tokens": 700, "response_format": {"type": "json_object"}},
-            {"max_completion_tokens": 700},
-            {"max_tokens": 700},
+            {"max_completion_tokens": 700, "response_format": {"type": "json_object"}}
         ]
-        last_error: Exception | None = None
-        for variant in variants:
+        while variants and attempts < attempts_left:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            variant = variants.pop(0)
+            attempts += 1
             try:
                 response = client.chat.completions.create(
-                    model=model, messages=messages, timeout=self.timeout, **variant
+                    model=model,
+                    messages=messages,
+                    timeout=remaining,
+                    **variant,
                 )
-            except Exception as exc:  # noqa: BLE001 - try the next variant
-                last_error = exc
-                continue
-            text = ""
+            except Exception as exc:  # noqa: BLE001 - deterministic fallback below
+                if attempts == 1 and attempts_left >= 2 and self._is_response_format_error(exc):
+                    variants.append({"max_tokens": 700})
+                    continue
+                return None, attempts
             try:
                 text = response.choices[0].message.content or ""
             except Exception:  # noqa: BLE001
-                continue
+                return None, attempts
             parsed = parse_json_object(text)
             if parsed is not None:
-                return parsed
-        if last_error:
-            raise last_error
-        return None
+                return parsed, attempts
+            # Malformed content is a failed model attempt; the caller may use
+            # the fallback model if the global deadline/budget allows it.
+            return None, attempts
+        return None, attempts
 
 
 def parse_json_object(text: str) -> dict | None:
