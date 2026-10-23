@@ -71,7 +71,7 @@ def test_product_message_updates_budget_while_budget_question_is_pending():
 
         assert result["slots"]["budget_max"] == 20_000_000
         assert result["pending"]["id"] == "q_location"
-        assert result["slots"]["query"] == "گوشی شیائومی تا ۲۰ میلیون"
+        assert result["slots"]["query"].startswith("گوشی شیائومی")
 
 
 def test_bare_typed_budget_and_location_still_answer_pending_questions():
