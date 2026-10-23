@@ -37,6 +37,29 @@ AVAILABLE_WORDS = ("موجود", "موجوده", "داریم", "هست", "دار
 UNAVAILABLE_WORDS = ("تموم", "ناموجود", "نداریم", "نداره", "نیست", "sold out")
 UNCLEAR_WORDS = ("چک میکنم", "چک می کنم", "می پرسم", "بعدا", "بعداً", "یه لحظه", "بررسی میکنم")
 
+# FIX5: refinement wording extends the *current* search («ارزون‌تر», «هم
+# بگرد»); it must never rebuild the query into those words.
+REFINEMENT_WORDS = (
+    "ارزون‌تر",
+    "ارزونتر",
+    "ارزان‌تر",
+    "گرانتر",
+    "گرون‌تر",
+    "نزدیک‌تر",
+    "دورتر",
+    "هم بگرد",
+    "بگرد",
+)
+
+# yes-style tokens (post-normalize) used to read bare confirmations
+# («آره» -> «اره» after normalization)
+YES_ANSWER_TOKENS = frozenset({"اره", "بله", "باشه", "اوکی", "حله", "تایید"})
+
+
+def is_yes_answer(text: str) -> bool:
+    tokens = set(re.findall(r"[^\W_]+", normalize(text), flags=re.UNICODE))
+    return bool(tokens & YES_ANSWER_TOKENS)
+
 UNIT_MULTIPLIERS = {
     "میلیون": 1_000_000,
     "میلیون تومان": 1_000_000,
@@ -193,106 +216,133 @@ def detect_in_torob(text: str) -> bool:
     return True
 
 
+def _strip_slot_words(text: str) -> str:
+    """Normalized text without location, payment and skip wording.
+
+    These words describe *where/how* the user shops, never *what* they buy;
+    leaking them into keywords (or the D2 residual check) breaks searches.
+    """
+    normalized = normalize(text)
+    for label in NEIGHBORHOODS:
+        if label == "بازار رضا":
+            continue
+        normalized = normalized.replace(normalize(label), " ")
+    for word in (*INSTALLMENT_WORDS, *CASH_WORDS, *SKIP_ANSWER_WORDS):
+        cleaned = normalize(word)
+        if cleaned:
+            normalized = normalized.replace(cleaned, " ")
+    for token in ("محله", "پرداخت", "نقدی"):
+        normalized = normalized.replace(token, " ")
+    return normalized
+
+
+
+# words that never become search terms / D2 residual tokens
+_KEYWORD_STOP_WORDS: frozenset[str] = frozenset({
+    "میخوام",
+    "میخواهم",
+    "میخواهیم",
+    "میخواستم",
+    "بخرم",
+    "بخریم",
+    "خرید",
+    "پیدا",
+    "کن",
+    "کنید",
+    "کنم",
+    "لطفا",
+    "لطفاً",
+    "امروز",
+    "حضوری",
+    "نزدیک",
+    "به",
+    "از",
+    "در",
+    "با",
+    "و",
+    "یا",
+    "یک",
+    "یه",
+    "که",
+    "برای",
+    "من",
+    "خوب",
+    "بهترین",
+    "عالی",
+    "خانم",
+    "آقا",
+    "قیمت",
+    "ارزان",
+    "گرون",
+    "ارزون",
+    "میلیون",
+    "تومان",
+    "تومن",
+    "میلیونی",
+    "تا",
+    "زیر",
+    "حدود",
+    "بودجه",
+    "دست",
+    "دوم",
+    "زنانه",
+    "مردانه",
+    "میخوام بخرم",
+    # intent / usage words: they describe *why* the product is bought,
+    # not *which* product it is, so they must never become search terms
+    "برنامه",
+    "برنامه نویسی",
+    "برنامهنویسی",
+    "نویسی",
+    "گیمینگ",
+    "گیم",
+    "بازی",
+    "دانشجویی",
+    "دانشجو",
+    "دانشگاهی",
+    "استفاده",
+    "مصرف",
+    "روزمره",
+    "مناسب",
+    "کیفیت",
+    "کاربری",
+    # generic product nouns: the detected category already covers them.
+    # Keeping them would split «لپ تاپ» into «تاپ» and break the AND
+    # search, so they are removed before tokenization.
+    "لپ تاپ",
+    "لپتاپ",
+    "لپ تپ",
+    "لپ",
+    "تاپ",
+    "نوت بوک",
+    "نوتبوک",
+    "نوت",
+    "بوک",
+})
+
+
+def _keyword_stop_words(category: str | None = None, extra: list[str] | None = None) -> set[str]:
+    stop = set(_KEYWORD_STOP_WORDS)
+    for word in extra or []:
+        cleaned = normalize(word)
+        if cleaned:
+            stop.add(cleaned)
+            for part in cleaned.split():
+                if len(part) > 3:
+                    stop.add(part)
+    if category:
+        stop.add(normalize(category))
+        # every part of the category name (even short ones like «لپ»/«تاپ»)
+        stop.update(normalize(category).split())
+    return stop
+
+
 def extract_keywords(text: str, category: str | None = None, extra_stop_words: list[str] | None = None) -> list[str]:
     """Very small keyword extractor: keep the product-ish words of the query."""
     if not text:
         return []
-    stop_words = {
-        normalize(word)
-        for word in {
-            "میخوام",
-            "میخواهم",
-            "میخواهیم",
-            "میخواستم",
-            "بخرم",
-            "بخریم",
-            "خرید",
-            "پیدا",
-            "کن",
-            "کنید",
-            "کنم",
-            "لطفا",
-            "لطفاً",
-            "امروز",
-            "حضوری",
-            "نزدیک",
-            "به",
-            "از",
-            "در",
-            "با",
-            "و",
-            "یا",
-            "یک",
-            "یه",
-            "که",
-            "برای",
-            "من",
-            "خوب",
-            "بهترین",
-            "عالی",
-            "خانم",
-            "آقا",
-            "قیمت",
-            "ارزان",
-            "گرون",
-            "ارزون",
-            "میلیون",
-            "تومان",
-            "تومن",
-            "میلیونی",
-            "تا",
-            "زیر",
-            "حدود",
-            "بودجه",
-            "دست",
-            "دوم",
-            "زنانه",
-            "مردانه",
-            "میخوام بخرم",
-            # intent / usage words: they describe *why* the product is bought,
-            # not *which* product it is, so they must never become search terms
-            "برنامه",
-            "برنامه نویسی",
-            "برنامهنویسی",
-            "نویسی",
-            "گیمینگ",
-            "گیم",
-            "بازی",
-            "دانشجویی",
-            "دانشجو",
-            "دانشگاهی",
-            "استفاده",
-            "مصرف",
-            "روزمره",
-            "مناسب",
-            "کیفیت",
-            "کاربری",
-            # generic product nouns: the detected category already covers them.
-            # Keeping them would split «لپ تاپ» into «تاپ» and break the AND
-            # search, so they are removed before tokenization.
-            "لپ تاپ",
-            "لپتاپ",
-            "لپ تپ",
-            "لپ",
-            "تاپ",
-            "نوت بوک",
-            "نوتبوک",
-            "نوت",
-            "بوک",
-        }
-    }
-    for word in extra_stop_words or []:
-        cleaned = normalize(word)
-        if cleaned:
-            stop_words.add(cleaned)
-            for part in cleaned.split():
-                if len(part) > 3:
-                    stop_words.add(part)
-    if category:
-        stop_words.add(normalize(category))
-        # every part of the category name (even short ones like «لپ»/«تاپ»)
-        stop_words.update(normalize(category).split())
-    normalized_text = normalize(text)
+    stop_words = _keyword_stop_words(category, extra_stop_words)
+    normalized_text = _strip_slot_words(text)
     # remove multi-word category nouns *before* tokenizing so «لپ تاپ» can
     # never leak a bare «تاپ» into the keyword list
     for phrase in ("لپ تاپ", "لپ تپ", "نوت بوک"):
@@ -306,6 +356,59 @@ def extract_keywords(text: str, category: str | None = None, extra_stop_words: l
             continue
         keywords.append(token)
     return keywords[:5]
+
+
+# --------------------------------------------------------------------------
+# FIX5 D1/D2: fresh queries vs. bare slot answers
+# --------------------------------------------------------------------------
+
+
+def residual_tokens(text: str) -> list[str]:
+    """Tokens left after stripping locations, budgets, payments and fillers.
+
+    The D2 decision in ``main`` is judged on these: if a typed message still
+    contains product words it is a real message, not the answer to the
+    pending question.
+    """
+    if not text:
+        return []
+    stripped = _strip_slot_words(text)
+    for phrase in ("لپ تاپ", "لپ تپ", "نوت بوک"):
+        stripped = stripped.replace(phrase, " ")
+    leftovers: list[str] = []
+    for token in re.findall(r"[^\W_]+", stripped, flags=re.UNICODE):
+        if token.isdigit():
+            continue
+        if len(token) < 3:
+            continue
+        leftovers.append(token)
+    return leftovers
+
+
+def is_refinement_text(text: str) -> bool:
+    """True for «ارزون‌تر» / «تو جمهوری هم بگرد» - wording that extends the
+    current search instead of starting a new one."""
+    if not text:
+        return False
+    normalized = normalize(text)
+    return any(normalize(word) in normalized for word in REFINEMENT_WORDS)
+
+
+def slot_ack(text: str) -> str | None:
+    """Short acknowledgment for a bare slot answer («نقدی ثبت شد»)."""
+    parts: list[str] = []
+    budget_max, budget_min = parse_budget(text)
+    if budget_max is not None or budget_min is not None:
+        parts.append("بودجه")
+    if detect_location(text) is not None:
+        parts.append("محله")
+    if detect_installment(text) is not None or is_yes_answer(text):
+        parts.append("نحوهٔ پرداخت")
+    if is_skip_answer(text):
+        return "ثبت شد ✓"
+    if not parts:
+        return None
+    return " و ".join(parts) + " ثبت شد ✓"
 
 
 # --------------------------------------------------------------------------
@@ -352,7 +455,9 @@ CLARIFY_QUESTIONS = {
     },
     "location": {
         "text": "کدوم محله برات نزدیک‌تره؟",
-        "chips": ["فردوسی", "جمهوری", "مهم نیست"],
+        # FIX5: no fake fixed hoods — the user types, shares GPS, or picks
+        # on the map; keeping only the skip answer as a chip
+        "chips": ["مهم نیست"],
     },
     "payment": {
         "text": "پرداخت قسطی/ترب‌پی برات مهمه؟",

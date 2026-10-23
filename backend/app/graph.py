@@ -349,7 +349,28 @@ def understand(state: AgentState) -> dict:
         }
 
     # the comparison wording must not become the shopping query either
-    if not slots.get("query") and not is_compare_turn:
+    # FIX5-D1: a *fresh* shopping message (its own category or product
+    # keywords, not a refinement like «ارزون‌تر» and not a bare slot answer)
+    # rebuilds query/keywords/category from its own text - typed text always
+    # wins over whatever a previous search left behind.
+    residual = rules.residual_tokens(text)
+    slot_only = bool(rules.slot_ack(text)) and not residual
+    fresh = (
+        not is_compare_turn
+        and not slot_only
+        and not rules.is_refinement_text(text)
+        and bool(extracted.get("category") or extracted.get("keywords"))
+    )
+    if fresh:
+        slots["query"] = text
+        slots["keywords"] = _clean_keywords(
+            list(extracted.get("keywords") or []), slots.get("location")
+        )
+        # A new keyword-only product query must also drop the previous
+        # category (e.g. «یخچال ساید» after «هدفون»); the category in the
+        # current turn, if any, is the only one that may constrain it.
+        slots["category"] = extracted.get("category")
+    elif not slots.get("query") and not is_compare_turn:
         slots["query"] = text
     if slots.get("category") and slots["category"] in ACCESSORY_CATEGORIES:
         slots["category"] = None
@@ -377,6 +398,11 @@ def understand(state: AgentState) -> dict:
         summary_parts.append("قسطی")
     summary = "، ".join(part for part in summary_parts if part) or "نیاز ثبت شد"
 
+    # FIX5-D3: a bare slot answer that hit a *different* slot than the open
+    # question («نقدی» while the location question waits) is acknowledged in
+    # one short line; the clarify loop re-asks the still-missing question.
+    acknowledge = rules.slot_ack(text) if (slot_only and not fresh) else None
+
     return {
         "slots": slots,
         "missing": missing,
@@ -386,6 +412,7 @@ def understand(state: AgentState) -> dict:
         # comparison card from an earlier turn must not ride along either.
         "phase": "discover",
         "compare": None,
+        "messages": [{"role": "assistant", "content": acknowledge}] if acknowledge else [],
         "trace": [_trace("understand", summary, started)],
     }
 

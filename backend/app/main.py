@@ -211,13 +211,18 @@ def _pending_question(session_id: str) -> dict | None:
 def _chat_answers_question(question: dict, text: str) -> bool:
     """Does the typed message look like an answer to the pending question?
 
-    FIX4-P1: a pending question must not silently die when the user types
-    the answer («جمهوری» while the location question is up) - otherwise the
-    payment question repeats instead of the promised product cards.  Only
-    confident matches count; anything else (e.g. a brand-new shopping
-    request typed while a question is up) falls through to the regular chat
-    flow.
+    FIX5-D2: only *bare* answers count.  A message carrying product words
+    (its own category, more than two residual tokens after removing
+    neighbourhood/budget/payment words) is a real request and must go the
+    normal chat path - the slots it mentions are filled by ``understand``.
     """
+    # a genuine shopping request always wins over a pending question
+    if rules.detect_category(text) is not None:
+        return False
+    if rules.is_skip_answer(text):
+        return True
+    if len(rules.residual_tokens(text)) > 2:
+        return False
     identifier = str(question.get("id") or "")
     slot = identifier[2:] if identifier.startswith("q_") else ""
     if not slot:
@@ -229,7 +234,7 @@ def _chat_answers_question(question: dict, text: str) -> bool:
         budget_max, budget_min = rules.parse_budget(text)
         return budget_max is not None or budget_min is not None
     if slot == "payment":
-        return rules.detect_installment(text) is not None
+        return rules.detect_installment(text) is not None or rules.is_yes_answer(text)
     return False
 
 
@@ -372,6 +377,13 @@ async def chat(body: ChatIn) -> Any:
         "text": body.text,
         "messages": [{"role": "user", "content": body.text}],
     }
+    if question:
+        # The user chose to continue with a regular message rather than
+        # answer the open question. The interrupted clarify node has not
+        # returned yet, so count that question as asked before rebuilding the
+        # turn; otherwise the optional payment question can unexpectedly pop
+        # up after the user's complete product/location request.
+        payload["asked"] = max(int((before.get("values") or {}).get("asked") or 0), 1)
     if body.location:
         payload["user_location"] = body.location.model_dump()
     result = await _invoke(body.session_id, payload)
