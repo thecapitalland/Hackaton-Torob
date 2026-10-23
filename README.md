@@ -127,13 +127,16 @@
 **ویندوز (PowerShell):**
 
 ```powershell
+# 0) گرفتن دیتابیس واقعی از Git LFS (برای کلون تازه لازم است)
+git lfs install
+git lfs pull
+
 # 1) venv + نصب وابستگی‌ها
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -r backend\requirements.txt
 
-# 2) ساخت دیتابیس از دیتاست خام ترب (به shops.csv / products.csv / offers.csv نیاز دارد)
-python backend\scripts\build_catalog.py --src <مسیر دیتاست torob-dataset> --out data\catalog.db
+# 2) markets را بساز/به‌روز کن
 python backend\scripts\build_markets.py --catalog data\catalog.db --out data\markets.json
 
 # 3) بیلد فرانت‌اند — خروجی مستقیماً در static/ ساخته می‌شود (همان‌جا که بک‌اند سرو می‌کند)
@@ -151,8 +154,8 @@ $env:LLM_MODE="off"; $env:DEMO_MODE="1"; $env:DEMO_NOW="2026-10-22T15:00:00+03:3
 **لینوکس / macOS:**
 
 ```bash
+git lfs install && git lfs pull
 python3 -m venv .venv && source .venv/bin/activate && pip install -r backend/requirements.txt
-python backend/scripts/build_catalog.py --src /path/to/torob-dataset --out data/catalog.db
 python backend/scripts/build_markets.py --catalog data/catalog.db --out data/markets.json
 (cd frontend && npm ci && npm run build)
 PYTHONIOENCODING=utf-8 LLM_MODE=off DEMO_MODE=1 DEMO_NOW=2026-10-22T15:00:00+03:30 uvicorn backend.app.main:app --port 8000
@@ -170,6 +173,9 @@ PYTHONIOENCODING=utf-8 LLM_MODE=off DEMO_MODE=1 DEMO_NOW=2026-10-22T15:00:00+03:
   (دیتاست خام: ۲۲۵٬۹۰۳ / ۳۳۱٬۵۰۶ / ۶٬۴۷۶ — کاهش عمدی برای زیر ۱۵۰ مگابایت شدن دیتابیس و حذف پرت‌هاست).
 - `build_markets.py` فایل `data/markets.json` را **بازنویسی** می‌کند؛ تغییرات دستی در آن (بازارهای بیرونی،
   ساعت‌های کاری) باید در `MARKET_DEFINITIONS` / `EXTERNAL_MARKETS` داخل اسکریپت اعمال شود، نه فقط در JSON.
+- فایل واقعی `data/catalog.db` با Git LFS نگه‌داری می‌شود (حدود ۱۲۶٫۶ MiB). پس از clone حتماً `git lfs pull` بزن؛ pointer فایل یا فایل صفر‌بایت قابل اجرا نیست.
+- هنگام startup، بک‌اند صحت دیتابیس و وجود جدول‌ها و داده‌ها را بررسی می‌کند. اگر فایل وجود نداشته باشد/خالی یا خراب باشد، در صورت تنظیم `TOROB_DATASET_DIR` به پوشهٔ دارای هر سه CSV (`shops.csv`, `products.csv`, `offers.csv`) در مسیر موقت بازسازی و جایگزین می‌کند. اگر دیتاست خام پیدا نشود، startup با خطای روشن (شامل دستور `git lfs pull`) متوقف می‌شود؛ با کاتالوگ خالی ادامه نمی‌دهد.
+- بازسازی دستی: `python backend/scripts/build_catalog.py --src <مسیر دیتاست torob-dataset> --out data/catalog.db`. برای بازسازی خودکار، `TOROB_DATASET_DIR=<مسیر دیتاست>` را در محیط بگذار.
 
 #### GapGPT (provider پیش‌فرض)
 
@@ -247,7 +253,7 @@ python backend/scripts/build_markets.py \
 حذف شدند، برای هر (کالا، فروشگاه) فقط ارزان‌ترین آفر ماند و در صورت لزوم دیتابیس تا زیر ۱۵۰ مگابایت
 کوچک شد.
 
-> فایل `data/catalog.db` داخل گیت نیست (حجمش زیاد است)؛ با همین دستور ساخته می‌شود.
+> فایل `data/catalog.db` در Git LFS است؛ در clone تازه `git lfs pull` لازم است. اگر LFS در دسترس نبود، دیتابیس را از CSVهای خام با دستور بالا بساز.
 
 ### ۲) بک‌اند
 

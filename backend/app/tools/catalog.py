@@ -13,7 +13,7 @@ import threading
 from functools import lru_cache
 from typing import Any, Iterable
 
-from ..data_static import catalog_path
+from ..data_static import catalog_path, ensure_catalog
 from ..normalize import normalize
 
 _CONN: sqlite3.Connection | None = None
@@ -26,7 +26,8 @@ def get_conn() -> sqlite3.Connection:
     if _CONN is None:
         with _LOCK:
             if _CONN is None:
-                conn = sqlite3.connect(str(catalog_path()), check_same_thread=False)
+                path = ensure_catalog()
+                conn = sqlite3.connect(str(path), check_same_thread=False)
                 conn.row_factory = sqlite3.Row
                 conn.execute("PRAGMA query_only = ON")
                 _CONN = conn

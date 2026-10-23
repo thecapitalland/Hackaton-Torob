@@ -7,6 +7,7 @@ approval and the "how did we get here" drawer.
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 import os
 import secrets
 import sqlite3
@@ -28,6 +29,7 @@ load_dotenv()
 from .data_static import (  # noqa: E402
     checkpoint_path,
     demo_mode,
+    ensure_catalog,
     llm_mode,
     load_markets,
 )
@@ -65,7 +67,15 @@ STATIC_DIR = (
     else _default_static_dir()
 )
 
-app = FastAPI(title="Torobche", version="1.0.0")
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # Fail early with an actionable message instead of returning empty search
+    # results when the LFS database was not hydrated or is a zero-byte file.
+    await run_in_threadpool(ensure_catalog)
+    yield
+
+
+app = FastAPI(title="Torobche", version="1.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

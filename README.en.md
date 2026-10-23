@@ -49,13 +49,14 @@ Desktop (1440×900) and mobile (390×844) captures for onboarding, location, res
 Works with **no API keys at all** (`LLM_MODE=off`, rule-based):
 
 ```bash
+# 0) fetch the real catalog from Git LFS (required on a fresh clone)
+git lfs install && git lfs pull
+
 # 1) venv + deps
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r backend/requirements.txt
 
-# 2) build the slim catalog + markets data from the official CSVs
-#    required inputs: shops.csv, products.csv, offers.csv
-python backend/scripts/build_catalog.py --src /path/to/torob-dataset --out data/catalog.db
+# 2) build/update markets
 python backend/scripts/build_markets.py --catalog data/catalog.db --out data/markets.json
 
 # 3) build the SPA - vite writes directly to ../static, where FastAPI serves it
@@ -82,6 +83,11 @@ Reproducibility notes:
   duplicate offers are dropped and the SQLite file must stay under 150 MB.
 - `build_markets.py` **overwrites** the committed `data/markets.json`; edit the curated
   `MARKET_DEFINITIONS` / `EXTERNAL_MARKETS` in the script, not just the JSON file.
+- The real `data/catalog.db` (about 126.6 MiB) is stored in Git LFS. Run `git lfs pull` after cloning.
+  Startup validates the SQLite integrity/schema and non-empty products/offers/shops. If missing,
+  zero-byte or invalid, it rebuilds to a temporary file when `TOROB_DATASET_DIR` points to a folder
+  containing `shops.csv`, `products.csv`, and `offers.csv`; otherwise startup stops with an actionable error.
+  Manual rebuild: `python backend/scripts/build_catalog.py --src /path/to/torob-dataset --out data/catalog.db`.
 
 ### GapGPT (default provider)
 

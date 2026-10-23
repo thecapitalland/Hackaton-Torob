@@ -20,6 +20,7 @@ static/
 *.db-journal
 *.db-shm
 *.db-wal
+!data/catalog.db
 
 # secrets / local
 .env
