@@ -70,6 +70,15 @@ def test_carpet_alternatives_use_the_dataset_category():
     assert any(item["category_name"] == "فرش دستبافت" for item in alternatives)
 
 
+def test_shoe_phrase_suggests_a_real_shoe_category():
+    candidates = ooc._category_candidates("کفش کتونی", None)
+    assert candidates
+    assert any("کفش" in category or "کتانی" in category for category in candidates)
+    alternatives = ooc.find_alternatives("کفش کتونی", None)
+    assert alternatives
+    assert any("کفش" in item["category_name"] or "کتانی" in item["category_name"] for item in alternatives)
+
+
 def test_tips_guard_strips_prices_and_phone_numbers():
     tips = ooc.sanitize_tips(
         [

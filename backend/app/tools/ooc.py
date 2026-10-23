@@ -62,6 +62,17 @@ FILLER_WORDS = {
 # Without it, a saffron query used to return pagers or perfumes just because
 # they shared a couple of trigrams.
 MIN_CATEGORY_SIMILARITY = 0.25
+_TOKEN_STOP_WORDS = FILLER_WORDS | {
+    "و", "یا", "برای", "قیمت", "بودجه", "میلیون", "تومان", "تومن", "تا", "زیر",
+    "کتونی",  # colloquial synonym helps category/title candidates without being an exact category token
+}
+
+
+def _tokens(text: str) -> set[str]:
+    return {
+        token for token in normalize(text).split()
+        if len(token) > 1 and token not in _TOKEN_STOP_WORDS and not token.isdigit()
+    }
 
 
 def clean_query(query: str) -> str:
@@ -123,14 +134,31 @@ def _category_candidates(query: str, market: dict | None) -> list[str]:
     if not cleaned:
         return []
     query_tri = trigrams(cleaned)
+    query_tokens = _tokens(cleaned)
     scored: list[tuple[float, str]] = []
     for category in all_category_names():
-        score = jaccard(query_tri, trigrams(category))
+        category_tokens = _tokens(category)
+        shared = query_tokens & category_tokens
+        token_score = len(shared) / max(1, len(query_tokens))
+        tri_score = jaccard(query_tri, trigrams(category))
+        score = max(tri_score, token_score)
         if category in related:
             # curated relation: keep it even when the words are different
             scored.append((1.0 + score, category))
-        elif score >= MIN_CATEGORY_SIMILARITY:
-            scored.append((score, category))
+        elif score >= MIN_CATEGORY_SIMILARITY or shared:
+            # Product-title overlap catches colloquial terms and brand/model
+            # phrasing that is absent from the dataset's category label.
+            title_overlap = 0.0
+            for product in products_in_category(category, limit=8):
+                product_tokens = _tokens(str(product.get("persian_title") or ""))
+                if query_tokens and product_tokens:
+                    title_overlap = max(
+                        title_overlap,
+                        len(query_tokens & product_tokens) / len(query_tokens),
+                    )
+            combined = max(score, title_overlap * 0.85)
+            if combined >= MIN_CATEGORY_SIMILARITY or shared:
+                scored.append((combined, category))
     scored.sort(key=lambda item: (-item[0], item[1]))
     return [category for _, category in scored[:3]]
 
