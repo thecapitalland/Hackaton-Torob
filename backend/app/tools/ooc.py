@@ -64,15 +64,16 @@ FILLER_WORDS = {
 MIN_CATEGORY_SIMILARITY = 0.25
 _TOKEN_STOP_WORDS = FILLER_WORDS | {
     "و", "یا", "برای", "قیمت", "بودجه", "میلیون", "تومان", "تومن", "تا", "زیر",
-    "کتونی",  # colloquial synonym helps category/title candidates without being an exact category token
 }
 
 
 def _tokens(text: str) -> set[str]:
-    return {
-        token for token in normalize(text).split()
-        if len(token) > 1 and token not in _TOKEN_STOP_WORDS and not token.isdigit()
-    }
+    tokens = set()
+    for token in normalize(text).split():
+        if len(token) <= 1 or token in _TOKEN_STOP_WORDS or token.isdigit():
+            continue
+        tokens.add({"کتونی": "کتانی"}.get(token, token))
+    return tokens
 
 
 def clean_query(query: str) -> str:
