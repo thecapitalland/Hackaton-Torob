@@ -1,3 +1,5 @@
+import type { Decision } from "./types/api.gen";
+
 export type Phase =
   | "discover"
   | "recommend"
@@ -17,10 +19,13 @@ export interface SlotLocation {
 export interface Slots {
   query?: string;
   category?: string | null;
+  brand?: string | null;
   keywords?: string[];
   budget_max?: number | null;
   budget_min?: number | null;
   location?: SlotLocation | null;
+  radius_km?: 2 | 5 | 10 | null;
+  accessory_request?: boolean;
   payment_in_person?: boolean;
   installment?: boolean;
   today?: boolean;
@@ -253,6 +258,12 @@ export interface Ooc {
   tips: string[];
   tips_label: string;
   market?: Market | null;
+  guide?: {
+    category_guess?: string | null;
+    tips: string[];
+    markets: string[];
+    brands_generic: string[];
+  } | null;
 }
 
 export interface CompareSide {
@@ -346,6 +357,7 @@ export interface ApiResponse {
   pending: Pending;
   trace: TraceEntry[];
   slots: Slots;
+  decision?: Decision | null;
   cards?: ProductCard[];
   more?: MoreItem[];
   specialty_market?: Market | null;

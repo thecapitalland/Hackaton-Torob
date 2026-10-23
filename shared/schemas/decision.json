@@ -1,0 +1,455 @@
+{
+  "$defs": {
+    "ChangeLocation": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "change_location",
+          "title": "Action",
+          "type": "string"
+        },
+        "area": {
+          "minLength": 2,
+          "title": "Area",
+          "type": "string"
+        },
+        "confidence": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Confidence",
+          "type": "number"
+        }
+      },
+      "required": [
+        "confidence",
+        "action",
+        "area"
+      ],
+      "title": "ChangeLocation",
+      "type": "object"
+    },
+    "ChangeRadius": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "change_radius",
+          "title": "Action",
+          "type": "string"
+        },
+        "confidence": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "radius_km": {
+          "anyOf": [
+            {
+              "enum": [
+                2,
+                5,
+                10
+              ],
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Radius Km"
+        }
+      },
+      "required": [
+        "confidence",
+        "action",
+        "radius_km"
+      ],
+      "title": "ChangeRadius",
+      "type": "object"
+    },
+    "Chitchat": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "chitchat",
+          "title": "Action",
+          "type": "string"
+        },
+        "confidence": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Confidence",
+          "type": "number"
+        }
+      },
+      "required": [
+        "confidence",
+        "action"
+      ],
+      "title": "Chitchat",
+      "type": "object"
+    },
+    "Compare": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "compare",
+          "title": "Action",
+          "type": "string"
+        },
+        "confidence": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "sides": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "title": "Sides",
+          "type": "array"
+        }
+      },
+      "required": [
+        "confidence",
+        "action",
+        "sides"
+      ],
+      "title": "Compare",
+      "type": "object"
+    },
+    "Haggle": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "haggle",
+          "title": "Action",
+          "type": "string"
+        },
+        "confidence": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "target_price": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Price"
+        }
+      },
+      "required": [
+        "confidence",
+        "action"
+      ],
+      "title": "Haggle",
+      "type": "object"
+    },
+    "NewSearch": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "new_search",
+          "title": "Action",
+          "type": "string"
+        },
+        "area": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Area"
+        },
+        "brand": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Brand"
+        },
+        "budget_max": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Budget Max"
+        },
+        "budget_min": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Budget Min"
+        },
+        "category": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Category"
+        },
+        "confidence": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "query": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Query",
+          "type": "string"
+        },
+        "radius_km": {
+          "anyOf": [
+            {
+              "enum": [
+                2,
+                5,
+                10
+              ],
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Radius Km"
+        }
+      },
+      "required": [
+        "confidence",
+        "action",
+        "query"
+      ],
+      "title": "NewSearch",
+      "type": "object"
+    },
+    "Ooc": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "ooc",
+          "title": "Action",
+          "type": "string"
+        },
+        "confidence": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "query": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Query",
+          "type": "string"
+        }
+      },
+      "required": [
+        "confidence",
+        "action",
+        "query"
+      ],
+      "title": "Ooc",
+      "type": "object"
+    },
+    "Refine": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "refine",
+          "title": "Action",
+          "type": "string"
+        },
+        "area": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Area"
+        },
+        "brand": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Brand"
+        },
+        "budget_max": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Budget Max"
+        },
+        "budget_min": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Budget Min"
+        },
+        "category": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Category"
+        },
+        "clear_budget_max": {
+          "default": false,
+          "title": "Clear Budget Max",
+          "type": "boolean"
+        },
+        "confidence": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Confidence",
+          "type": "number"
+        }
+      },
+      "required": [
+        "confidence",
+        "action"
+      ],
+      "title": "Refine",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "accessory_request": {
+      "default": false,
+      "title": "Accessory Request",
+      "type": "boolean"
+    },
+    "intent": {
+      "discriminator": {
+        "mapping": {
+          "change_location": "#/$defs/ChangeLocation",
+          "change_radius": "#/$defs/ChangeRadius",
+          "chitchat": "#/$defs/Chitchat",
+          "compare": "#/$defs/Compare",
+          "haggle": "#/$defs/Haggle",
+          "new_search": "#/$defs/NewSearch",
+          "ooc": "#/$defs/Ooc",
+          "refine": "#/$defs/Refine"
+        },
+        "propertyName": "action"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/NewSearch"
+        },
+        {
+          "$ref": "#/$defs/Refine"
+        },
+        {
+          "$ref": "#/$defs/ChangeRadius"
+        },
+        {
+          "$ref": "#/$defs/ChangeLocation"
+        },
+        {
+          "$ref": "#/$defs/Compare"
+        },
+        {
+          "$ref": "#/$defs/Haggle"
+        },
+        {
+          "$ref": "#/$defs/Ooc"
+        },
+        {
+          "$ref": "#/$defs/Chitchat"
+        }
+      ],
+      "title": "Intent"
+    },
+    "rejected_fields": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Rejected Fields",
+      "type": "array"
+    },
+    "source": {
+      "enum": [
+        "llm",
+        "rule",
+        "llm+guard"
+      ],
+      "title": "Source",
+      "type": "string"
+    }
+  },
+  "required": [
+    "intent",
+    "source"
+  ],
+  "title": "Decision",
+  "type": "object"
+}

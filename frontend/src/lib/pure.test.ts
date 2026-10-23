@@ -9,6 +9,7 @@ import { isShopInMarket, shopsInMarket } from "./market";
 import { filterByRadius, shopLocationLine, toggleCompare } from "./shop";
 import { buildTripLine } from "./trip";
 import type { Haggle } from "../types";
+import { decisionActionName } from "./decision";
 
 function makeShop(overrides: Partial<Shop> = {}): Shop {
   return {
@@ -276,5 +277,15 @@ describe("radius and compare selection (UX)", () => {
     expect(toggleCompare([], "a")).toEqual(["a"]);
     expect(toggleCompare(["a", "b"], "a")).toEqual(["b"]);
     expect(toggleCompare(["a", "b", "c", "d"], "e")).toEqual(["a", "b", "c", "d"]);
+  });
+});
+
+describe("generated decision action union", () => {
+  it("maps every discriminated action", () => {
+    const actions = [
+      "new_search", "refine", "change_radius", "change_location",
+      "compare", "haggle", "ooc", "chitchat",
+    ] as const;
+    for (const action of actions) expect(decisionActionName(action)).toBeTruthy();
   });
 });

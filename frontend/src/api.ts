@@ -67,6 +67,12 @@ export const api = {
       body: JSON.stringify({ session_id: sessionId, ...location }),
     }),
 
+  updateRadius: (sessionId: string, radiusKm: 2 | 5 | 10 | null) =>
+    request<ApiResponse>("/api/radius", {
+      method: "POST",
+      body: JSON.stringify({ session_id: sessionId, radius_km: radiusKm }),
+    }),
+
   compareProducts: (sessionId: string, productIds: string[]) =>
     request<ApiResponse>("/api/compare", {
       method: "POST",

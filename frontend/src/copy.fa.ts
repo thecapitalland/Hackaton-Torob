@@ -40,6 +40,19 @@ export const copy = {
     location: "محله",
   },
 
+  decision: {
+    actions: {
+      new_search: "جستجوی تازه",
+      refine: "اصلاح جستجو",
+      change_radius: "تغییر شعاع",
+      change_location: "تغییر محله",
+      compare: "مقایسه",
+      haggle: "چانه‌زنی",
+      ooc: "بیرون از کاتالوگ",
+      chitchat: "گفتگوی عمومی",
+    },
+  },
+
   cards: {
     title: "پیشنهادهای من",
     best: "🏆 بهترین انتخاب",
@@ -180,6 +193,10 @@ export const copy = {
     notFound: "را در داده‌های ترب پیدا نکردم.",
     closest: "نزدیک‌ترین‌ها در ترب",
     tips: "نکته‌های خرید",
+    guideTitle: "راهنمای عمومی خرید",
+    outsideDataset: "پیشنهاد عمومی — خارج از دیتاست ترب",
+    likelyCategory: "دستهٔ احتمالی",
+    genericBrands: "برندهای این دسته",
     marketTitle: "🏬 بورس معمول این کالا در تهران",
     noMarket: "بورس مشخصی برای این کالا نمی‌شناسم.",
     source: "منبع",

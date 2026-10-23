@@ -68,16 +68,22 @@ export function OutOfCatalogCard({
         </div>
       ) : null}
 
-      {ooc.tips?.length ? (
+      {(ooc.guide?.tips?.length || ooc.tips?.length) ? (
         <div className="rounded-2xl border border-brand-amber/50 bg-brand-yellow p-3">
           <div className="mb-2 flex flex-wrap items-center gap-2">
-            <h4 className="text-[13.5px] font-bold">{copy.ooc.tips}</h4>
+            <h4 className="text-[13.5px] font-bold">{copy.ooc.guideTitle}</h4>
             <span className="rounded-full bg-brand-amber/20 px-2 py-0.5 text-[10.5px] font-medium text-brand-muted">
-              {ooc.tips_label}
+              {ooc.tips_label || copy.ooc.outsideDataset}
             </span>
           </div>
+          {ooc.guide?.category_guess ? (
+            <p className="mb-1 text-[11.5px] text-brand-muted">{copy.ooc.likelyCategory}: {ooc.guide.category_guess}</p>
+          ) : null}
+          {ooc.guide?.brands_generic?.length ? (
+            <p className="mb-1 text-[11.5px] text-brand-muted">{copy.ooc.genericBrands}: {ooc.guide.brands_generic.join("، ")}</p>
+          ) : null}
           <ul className="space-y-1 text-[12.5px] leading-6 text-brand-muted">
-            {ooc.tips.map((tip) => (
+            {(ooc.guide?.tips ?? ooc.tips).map((tip) => (
               <li key={tip}>• {tip}</li>
             ))}
           </ul>
