@@ -32,6 +32,7 @@ from .data_static import (  # noqa: E402
     load_markets,
 )
 from .graph import build_graph  # noqa: E402
+from . import rules  # noqa: E402
 from .llm import get_client  # noqa: E402
 from .services import neshan as neshan_service  # noqa: E402
 from .tools import cafes as cafes_tool  # noqa: E402
@@ -192,6 +193,46 @@ def _extract_pending(result: Any) -> dict | None:
     return payload
 
 
+def _pending_question(session_id: str) -> dict | None:
+    """The clarify question currently waiting for an answer, if any."""
+    graph = get_graph()
+    try:
+        snapshot = graph.get_state(config_for(session_id))
+    except Exception:
+        return None
+    for task in getattr(snapshot, "tasks", None) or []:
+        for invocation in getattr(task, "interrupts", None) or []:
+            value = getattr(invocation, "value", None)
+            if isinstance(value, dict) and value.get("type") == "question":
+                return value
+    return None
+
+
+def _chat_answers_question(question: dict, text: str) -> bool:
+    """Does the typed message look like an answer to the pending question?
+
+    FIX4-P1: a pending question must not silently die when the user types
+    the answer («جمهوری» while the location question is up) - otherwise the
+    payment question repeats instead of the promised product cards.  Only
+    confident matches count; anything else (e.g. a brand-new shopping
+    request typed while a question is up) falls through to the regular chat
+    flow.
+    """
+    identifier = str(question.get("id") or "")
+    slot = identifier[2:] if identifier.startswith("q_") else ""
+    if not slot:
+        missing = question.get("missing") or []
+        slot = str(missing[0]) if missing else ""
+    if slot == "location":
+        return rules.detect_location(text) is not None
+    if slot == "budget":
+        budget_max, budget_min = rules.parse_budget(text)
+        return budget_max is not None or budget_min is not None
+    if slot == "payment":
+        return rules.detect_installment(text) is not None
+    return False
+
+
 async def _invoke(session_id: str, payload: dict) -> Any:
     graph = get_graph()
     return await run_in_threadpool(graph.invoke, payload, config_for(session_id))
@@ -320,6 +361,11 @@ async def new_session() -> dict:
 async def chat(body: ChatIn) -> Any:
     if not body.text.strip():
         return _error("BAD_REQUEST", "پیام خالی است.")
+    # FIX4-P1: a typed answer to the pending clarify question resolves it
+    # (same flow as the chip buttons) instead of being dropped silently.
+    question = _pending_question(body.session_id)
+    if question and _chat_answers_question(question, body.text):
+        return await _resume_and_respond(body.session_id, body.text)
     before = _state_snapshot(body.session_id)
     payload: dict[str, Any] = {
         "action": "chat",
@@ -346,15 +392,15 @@ async def chat(body: ChatIn) -> Any:
     return payload
 
 
-@app.post("/api/resume")
-async def resume(body: ResumeIn) -> Any:
-    before = _state_snapshot(body.session_id)
-    result = await _resume(body.session_id, body.value)
+async def _resume_and_respond(session_id: str, value: Any) -> Any:
+    """Resume the interrupted clarify step and build the response payload."""
+    before = _state_snapshot(session_id)
+    result = await _resume(session_id, value)
     pending = _extract_pending(result)
     values = (result or {}).get("values") or {}
     if not values:
-        values = _state_snapshot(body.session_id)["values"]
-    payload = _base_payload(body.session_id, values, before, pending)
+        values = _state_snapshot(session_id)["values"]
+    payload = _base_payload(session_id, values, before, pending)
     payload["cards"] = values.get("cards") or []
     payload["more"] = values.get("more") or []
     payload["specialty_market"] = values.get("specialty_market")
@@ -365,7 +411,15 @@ async def resume(body: ResumeIn) -> Any:
     if values.get("phase") == "out_of_catalog":
         payload["mode"] = "out_of_catalog"
         payload["ooc"] = values.get("ooc") or {}
+    if values.get("phase") == "compare":
+        payload["mode"] = "compare"
+        payload["compare"] = values.get("compare") or {}
     return payload
+
+
+@app.post("/api/resume")
+async def resume(body: ResumeIn) -> Any:
+    return await _resume_and_respond(body.session_id, body.value)
 
 
 @app.post("/api/select_product")

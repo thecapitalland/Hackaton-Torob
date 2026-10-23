@@ -7,10 +7,11 @@ import type { Compare, CompareSide } from "../types";
  * P3: the «X یا Y کدوم بهتره؟» card.
  *
  * One table per side (real numbers from the catalog: price range + median,
- * #models, #shops, #near ≤5 km), an explicit conditional verdict labeled
- * «تصمیم با تو», and — when a replica-style listing surfaced — an honesty
- * warning plus an in-store checklist.  Both sides stay tappable and jump
- * into the normal product flow of that side's best model.
+ * #models, #shops, #near ≤5 km — shown as «—» when the user gave no
+ * position), an honest verdict badge labeled «تحلیل ایجنت», and — when a
+ * replica-style listing surfaced — an honesty warning plus an in-store
+ * checklist.  Both sides stay tappable and jump into the normal product
+ * flow of that side's best model.
  */
 
 function SideRow({ label, value }: { label: string; value: string }) {
@@ -48,7 +49,10 @@ function SideTable({ side, onPick }: { side: CompareSide; onPick: (productId: st
       />
       <SideRow label={copy.compare.models} value={faDigits(side.n_models)} />
       <SideRow label={copy.compare.shops} value={faDigits(side.n_shops)} />
-      <SideRow label={copy.compare.near} value={faDigits(side.n_near)} />
+      <SideRow
+        label={copy.compare.near}
+        value={side.n_near === null || side.n_near === undefined ? "—" : faDigits(side.n_near)}
+      />
       {best?.title ? (
         <p className="mt-1.5 line-clamp-2 text-[11px] leading-5 text-brand-gray">
           🏆 {best.title}

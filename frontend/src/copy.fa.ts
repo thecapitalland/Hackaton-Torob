@@ -173,7 +173,7 @@ export const copy = {
   },
 
   compare: {
-    verdictLabel: "تصمیم با تو",
+    verdictLabel: "تحلیل ایجنت",
     models: "مدل",
     shops: "فروشگاه",
     near: "نزدیک تا ۵ کیلومتر",

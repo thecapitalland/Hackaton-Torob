@@ -106,7 +106,7 @@ def test_compare_verdict_llm_off(catalog_path):
     )
     result = state["compare"]
     verdict = result["verdict"]
-    assert result["verdict_label"] == "تصمیم با تو"
+    assert result["verdict_label"] == "تحلیل ایجنت"
     assert verdict
     # the LLM-off verdict is deterministic and only quotes computed numbers
     sides = result["sides"]
@@ -140,7 +140,7 @@ def test_compare_api_end_to_end(client):
     assert data["mode"] == "compare"
     compare = data["compare"]
     assert compare["title"]
-    assert compare["verdict_label"] == "تصمیم با تو"
+    assert compare["verdict_label"] == "تحلیل ایجنت"
     sides = compare["sides"]
     assert [side["label"] for side in sides] == ["هدفون", "هندزفری"]
     for side in sides:
@@ -158,3 +158,76 @@ def test_compare_api_end_to_end(client):
     ).json()
     assert data2["slots"].get("compare") is None
     assert data2["phase"] in {"recommend", "discover", "stores"}
+
+
+def test_compare_turn_does_not_poison_next_query(client):
+    """FIX4-P1: after a comparison, a normal query rebuilds query/keywords.
+
+    «سامسونگ یا شیائومی کدوم بهتره؟» → «گوشی سامسونگ تا ۶۰ میلیون» →
+    «جمهوری» must end in product cards, not out_of_catalog.
+    """
+    session_id = client.post("/api/session").json()["session_id"]
+    data1 = client.post(
+        "/api/chat",
+        json={"session_id": session_id, "text": "سامسونگ یا شیائومی کدوم بهتره؟"},
+    ).json()
+    assert data1["phase"] == "compare"
+    # the comparison wording must not become keywords (کدوم/بهتره ...)
+    keywords1 = " ".join(data1["slots"].get("keywords") or [])
+    assert "کدوم" not in keywords1
+    assert "بهتره" not in keywords1
+
+    data2 = client.post(
+        "/api/chat",
+        json={"session_id": session_id, "text": "گوشی سامسونگ تا ۶۰ میلیون"},
+    ).json()
+    # the previous comparison text must not ride along as the query
+    assert data2["slots"].get("query") != "سامسونگ یا شیائومی کدوم بهتره؟"
+    assert data2["slots"].get("compare") is None
+
+    data3 = client.post(
+        "/api/chat", json={"session_id": session_id, "text": "جمهوری"}
+    ).json()
+    assert data3.get("mode") != "out_of_catalog"
+    assert data3.get("cards"), "the final turn must show product cards"
+
+
+def test_adidas_side_found_and_nike_dominant_category(catalog_path):
+    """FIX4-P2/P3: آدیداس matches despite single-shop entries; نایک keeps
+    only its dominant category so جوراب and کفش are not mixed."""
+    state = graph.compare({"slots": {"compare": ["آدیداس", "نایک"]}})
+    sides = state["compare"]["sides"]
+    adidas, nike = sides
+
+    assert adidas["n_shops"] >= 1
+    assert adidas["median"] > 0
+    assert nike["n_shops"] >= 1
+    assert nike["median"] > 0
+
+    # matching is normalized on both sides (آ ↔ ا): «ادیداس» lands on the
+    # exact same aggregate as «آدیداس»
+    same_term = graph._compare_side_data("ادیداس", {})
+    assert same_term["n_shops"] == adidas["n_shops"]
+    assert same_term["median"] == adidas["median"]
+
+    # the نایک side is narrowed to its dominant category: the wider
+    # min_shops=1 pool mixes جوراب + کفش, the card must not
+    dominant = graph._dominant_category(["نایک"], None, None)
+    assert dominant
+    if nike["n_models"] >= 2:
+        pool = catalog.search_products(
+            ["نایک"], None, None, None, limit=40, min_shops=1, match_mode="any"
+        )
+        narrowed = [p for p in pool if (p.get("category_name") or "").strip() == dominant]
+        assert narrowed, "the dominant category must keep at least its own products"
+def test_compare_no_location_near_unknown_and_full_checklist(catalog_path):
+    """FIX4-P3: without a user position n_near is None (or «—» in the UI)
+    and the checklist includes the box/model-code authenticity check."""
+    state = graph.compare({"slots": {"compare": ["هدفون", "هندزفری"]}})
+    sides = state["compare"]["sides"]
+    for side in sides:
+        assert side["n_near"] is None
+    checklist = state["compare"]["checklist"]
+    assert any("جعبهٔ اصلی" in item for item in checklist)
+    assert len(checklist) >= 4
+

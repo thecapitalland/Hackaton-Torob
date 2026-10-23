@@ -252,7 +252,7 @@ export interface CompareSide {
   label: string;
   n_models: number;
   n_shops: number;
-  n_near: number;
+  n_near: number | null;
   min: number;
   max: number;
   median: number;

@@ -308,6 +308,30 @@ def understand(state: AgentState) -> dict:
     extracted = _llm_extract(text, history, current, state.get("last_question"))
     if not extracted:
         extracted = _rule_extract(text)
+
+    # FIX4-P1: a comparison turn must not poison the shopping slots.  The
+    # side names and the wording of «X یا Y کدوم بهتره؟» (کدوم، بهتره ...)
+    # are not shopping keywords, and the comparison text must not become
+    # the query a later search runs with.  Likewise the turn right after a
+    # comparison is a fresh shopping intent: rebuild query/keywords/category
+    # from the new text only.
+    pair = extracted.get("compare") or rules.extract_compare(text)
+    is_compare_turn = (
+        isinstance(pair, list)
+        and len(pair) == 2
+        and bool(pair[0]) and bool(pair[1]) and pair[0] != pair[1]
+    )
+    pair = [str(pair[0]), str(pair[1])] if is_compare_turn else None
+    if is_compare_turn:
+        # drop the comparison wording before it reaches the merged slots
+        extracted = {**extracted, "keywords": []}
+    elif "compare" in (current or {}):
+        # the previous turn showed a comparison card: the user moved on
+        current = {
+            key: value
+            for key, value in (current or {}).items()
+            if key not in ("query", "keywords", "category", "compare")
+        }
     slots = _merge_slots(current, extracted)
 
     # Update #1: a GPS position from the client fills an empty location slot,
@@ -324,18 +348,18 @@ def understand(state: AgentState) -> dict:
             "lon": user_location["lon"],
         }
 
-    if not slots.get("query"):
+    # the comparison wording must not become the shopping query either
+    if not slots.get("query") and not is_compare_turn:
         slots["query"] = text
     if slots.get("category") and slots["category"] in ACCESSORY_CATEGORIES:
         slots["category"] = None
     slots["keywords"] = _clean_keywords(slots.get("keywords"), slots.get("location"))
 
-    # P3: the «X یا Y کدوم بهتره» comparison is per-turn state.  A pair found
-    # now routes to the compare node; any later normal query clears it so the
-    # session returns to the regular shopping flow.
-    pair = extracted.get("compare") or rules.extract_compare(text)
-    if isinstance(pair, list) and len(pair) == 2 and pair[0] and pair[1] and pair[0] != pair[1]:
-        slots["compare"] = [str(pair[0]), str(pair[1])]
+    # P3/FIX4-P1: the comparison is per-turn state.  A pair found now routes
+    # to the compare node; any later normal query clears it so the session
+    # returns to the regular shopping flow.
+    if pair:
+        slots["compare"] = pair
     elif "compare" in slots:
         slots.pop("compare", None)
 
@@ -808,8 +832,59 @@ _REPLICA_WARNING = "در عنوان یک طرف نشانهٔ «کپی/درجه �
 _DEFAULT_CHECKLIST = [
     "فاکتور رسمی با مهر فروشگاه بگیر",
     "گارانتی یا هولوگرام اصالت را چک کن",
+    "جعبهٔ اصلی و کد مدل را با سایت سازنده تطبیق بده",
     "کالا را حضوری تست کن و با نمونهٔ مغازه‌های کنار هم مقایسه کن",
 ]
+
+
+def _compare_search(keywords: list[str], category: str | None, budget_max, budget_min) -> list[dict]:
+    """The compare-side search ladder: strict → relaxed → min_shops=1.
+
+    Some catalog entries (e.g. آدیداس models) are listed by a single shop
+    only - without the last rung those brands would look empty while their
+    products clearly exist.
+    """
+    if category:
+        products = catalog.search_products(
+            keywords, category, budget_max, budget_min, limit=40, min_shops=2, match_mode="all"
+        )
+    else:
+        products = catalog.search_products(
+            keywords, None, budget_max, budget_min, limit=40, min_shops=2, match_mode="all"
+        )
+    if not products:
+        products = catalog.search_products(
+            keywords, None, budget_max, budget_min, limit=40, min_shops=2, match_mode="any"
+        )
+    if not products:
+        products = catalog.search_products(
+            keywords, None, budget_max, budget_min, limit=40, min_shops=1, match_mode="any"
+        )
+    return products
+
+
+def _dominant_category(keywords: list[str], budget_max, budget_min) -> str:
+    """Mode of the category across a wider pool for brand-only searches.
+
+    A brand like نایک spans جوراب and کفش: the wider (min_shops=1) pool
+    decides which category dominates so the price statistics are not a
+    sock/shoes mixture.  Returns "" when no category dominates.
+    """
+    # ``search_products`` swallows sqlite errors and returns [] on its own
+    pool = catalog.search_products(
+        keywords, None, budget_max, budget_min, limit=40, min_shops=1, match_mode="any"
+    )
+    if not pool:
+        return ""
+    counts: dict[str, int] = {}
+    for product in pool:
+        cat = (product.get("category_name") or "").strip()
+        if cat:
+            counts[cat] = counts.get(cat, 0) + 1
+    if not counts:
+        return ""
+    dominant = max(counts.items(), key=lambda kv: kv[1])[0]
+    return dominant
 
 
 def _compare_side_data(term: str, slots: dict) -> dict:
@@ -819,30 +894,36 @@ def _compare_side_data(term: str, slots: dict) -> dict:
     budget_max = slots.get("budget_max")
     budget_min = slots.get("budget_min")
 
-    products = catalog.search_products(
-        keywords, category, budget_max, budget_min, limit=40, min_shops=2, match_mode="all"
-    )
-    if not products:
-        products = catalog.search_products(
-            keywords, None, budget_max, budget_min, limit=40, min_shops=2, match_mode="any"
-        )
+    products = _compare_search(keywords, category, budget_max, budget_min)
+
+    # FIX4: a brand without a category must not mix جوراب and کفش - keep
+    # only the dominant category of the wider result pool (its products are
+    # kept whenever the filter would not empty the side).
+    if not category and len(products) >= 2:
+        dominant = _dominant_category(keywords, budget_max, budget_min)
+        if dominant:
+            narrowed = [p for p in products if (p.get("category_name") or "").strip() == dominant]
+            if narrowed:
+                products = narrowed
 
     location = slots.get("location") or {}
     user_lat = location.get("lat")
     user_lon = location.get("lon")
 
+    # FIX4: the replica warning reads every matching title, not just the
+    # eight models whose offers feed the price statistics.
+    replica = any(
+        rules.replica_flag(product.get("persian_title") or "") for product in products
+    )
+
     pseudo: list[dict] = []
     shops: set = set()
     near: set = set()
     titles: list[str] = []
-    replica = False
     best: dict | None = None
 
     for product in products[:COMPARE_MAX_MODELS]:
-        title = product.get("persian_title") or ""
-        if rules.replica_flag(title):
-            replica = True
-        titles.append(title)
+        titles.append(product.get("persian_title") or "")
         if (
             best is None
             or product.get("n_shops", 0) > best.get("n_shops", 0)
@@ -884,7 +965,8 @@ def _compare_side_data(term: str, slots: dict) -> dict:
         "label": term,
         "n_models": min(len(products), COMPARE_MAX_MODELS),
         "n_shops": stats["n_shops"],
-        "n_near": len(near),
+        # FIX4: without a user position «near» is unknown, not zero
+        "n_near": len(near) if user_lat is not None and user_lon is not None else None,
         "min": stats["min"],
         "max": stats["max"],
         "median": stats["median"],
@@ -895,7 +977,7 @@ def _compare_side_data(term: str, slots: dict) -> dict:
 
 
 def _compare_verdict_template(side_a: dict, side_b: dict) -> str:
-    """Deterministic verdict, labeled «تصمیم با تو»; used when the LLM is off
+    """Deterministic verdict (badge: «تحلیل ایجنت»); used when the LLM is off
     or its numbers do not validate."""
     sides = [side for side in (side_a, side_b) if side["n_shops"]]
     if not sides:
@@ -932,7 +1014,9 @@ def _compare_verdict_template(side_a: dict, side_b: dict) -> str:
             f"({fa_digits(str(dearer['n_shops']))} فروشگاه در برابر "
             f"{fa_digits(str(cheaper['n_shops']))})."
         )
-    if side_a["n_near"] != side_b["n_near"]:
+    # «نزدیک» is unknown (None) when the user gave no position - only
+    # compare when both sides actually know it
+    if side_a["n_near"] is not None and side_b["n_near"] is not None and side_a["n_near"] != side_b["n_near"]:
         closer = max((side_a, side_b), key=lambda side: side["n_near"])
         if closer["n_near"]:
             parts.append(
@@ -980,11 +1064,13 @@ def compare(state: AgentState) -> dict:
             parsed = CompareOut(**raw)
             candidate_verdict = parsed.verdict.strip()
             candidate_checklist = [str(item).strip() for item in parsed.checklist if str(item).strip()]
-            # the LLM may only reuse numbers the tools computed
+            # the LLM may only reuse numbers the tools computed; «نزدیک» is
+            # unknown (None) when the user gave no position
             allowed = {
                 float(side[key])
                 for side in (side_a, side_b)
                 for key in ("min", "max", "median", "n_shops", "n_models", "n_near")
+                if side[key] is not None
             }
             allowed.add(float(COMPARE_NEAR_M / 1_000))  # the «۵ کیلومتری» radius
             text = " ".join([candidate_verdict, *candidate_checklist])
@@ -999,7 +1085,9 @@ def compare(state: AgentState) -> dict:
         "title": f"مقایسهٔ {side_a['label']} و {side_b['label']}",
         "sides": [side_a, side_b],
         "verdict": verdict,
-        "verdict_label": "تصمیم با تو",
+        # FIX4-P2: the badge is an honest «agent analysis»; the final word
+        # still stays with the user inside the verdict text itself
+        "verdict_label": "تحلیل ایجنت",
         "warning": _REPLICA_WARNING if replica_hit else None,
         "checklist": checklist,
     }
