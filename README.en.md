@@ -1,12 +1,14 @@
 # Torobche 🌱
 
-**An AI shopping agent for in-person shopping in Tehran.** Persian, RTL, mobile-first.
+**An AI shopping agent for in-person shopping in Tehran.** Persian, RTL, mobile-first, with location-first onboarding and chat-based product discovery.
 
 You describe a vague need → the agent asks up to 3 clarifying questions (quick-reply chips) → shows 3 product
 cards (best / budget / premium) → you pick one → the agent lists the shops that sell it (list + map, open-now
 badge, distance, in-person payment, transparency badge) → **with your explicit permission** it sends simulated
 messages to the shops, parses the replies, re-ranks the shops → and finally builds a trip plan with a backup
 shop and a nearby cafe.
+
+The flow starts with **“Where are you?”**: use GPS, type a neighbourhood, or pick a point on a map. Search results stay in the chat; the shop map opens from a compact thumbnail.
 
 ## ✨ Highlights
 
@@ -18,6 +20,11 @@ shop and a nearby cafe.
   labelled «اطلاعات عمومی».
 - **Out-of-catalog fallback**: when the product is not in the dataset the agent says so honestly, offers real
   alternatives from the catalog and general shopping tips — never an invented shop or price.
+- **Offline Tehran neighbourhood lookup**: around 60 neighbourhoods and aliases are bundled in
+  `backend/app/data/tehran_neighbourhoods.json`. Neshan Search is merged in when configured; no API key is required.
+- **Radius filters**: 2, 5 and 10 km, or all Tehran (the default), filter both shop results and the map. Empty radii offer a one-tap expansion.
+- **Editable search summary**: product, budget, neighbourhood and radius stay visible; natural-language budget/location edits keep the current session.
+- **Selective comparison**: select 2–4 product cards for a computed price range, median, seller count and visual “Agent analysis” verdict. The direct “X or Y?” path remains available.
 - **Human in the loop**: no message is ever sent without a LangGraph `interrupt` approval; the user sees and
   can edit the exact message first.
 - **Transparent evidence instead of fake reviews**: a 0–5 “information completeness” meter with the signals
@@ -31,6 +38,10 @@ shop and a nearby cafe.
 
 React 18 · Vite · TypeScript · TailwindCSS · react-leaflet (OSM) · framer-motion · Vazirmatn ·
 FastAPI · LangGraph (+ SQLite checkpointer) · OpenAI SDK → BoxAPI · SQLite (read-only catalog)
+
+## UX smoke screenshots
+
+Desktop (1440×900) and mobile (390×844) captures for onboarding, location, result map, radius, summary, OOC suggestions and selected comparison are in [docs/ux](docs/ux/).
 
 ## 🚀 Quick start (from scratch)
 

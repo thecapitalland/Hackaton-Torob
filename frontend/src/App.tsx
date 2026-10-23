@@ -63,6 +63,7 @@ export default function App() {
   const [toast, setToast] = useState<string | null>(null);
   const [location, setLocation] = useState<SlotLocation | null>(null);
   const [locationOpen, setLocationOpen] = useState(false);
+  const [locationMode, setLocationMode] = useState<"options" | "gps" | "search" | "map">("options");
   const [mapOpen, setMapOpen] = useState(false);
   const [radiusKm, setRadiusKm] = useState<number | null>(null);
   const [routes, setRoutes] = useState<Record<string, RouteInfo>>({});
@@ -338,6 +339,11 @@ export default function App() {
     }
   };
 
+  const openLocation = (mode: "options" | "gps" | "search" | "map" = "options") => {
+    setLocationMode(mode);
+    setLocationOpen(true);
+  };
+
   const compareSelected = async (productIds: string[]) => {
     if (!sessionId || busy || productIds.length < 2) return;
     setBusy(true);
@@ -377,7 +383,7 @@ export default function App() {
             </div>
             <div className="flex items-center gap-2">
               <button
-                onClick={() => setLocationOpen(true)}
+                onClick={() => openLocation()}
                 className="max-w-[180px] truncate rounded-full border border-brand-border bg-white px-3 py-2 text-[11px] font-bold"
               >
                 📍 {location?.label ?? slots.location?.label ?? copy.home.location} · {copy.home.changeLocation}
@@ -399,9 +405,9 @@ export default function App() {
                 <div className="rounded-card border border-brand-border bg-white p-3 shadow-card">
                   <div className="mb-2 text-[14px] font-bold">{copy.home.location}</div>
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-                    <button onClick={() => setLocationOpen(true)} className="rounded-xl bg-brand-bg p-3 text-[12px] font-bold">{copy.home.useGps}</button>
-                    <button onClick={() => setLocationOpen(true)} className="rounded-xl bg-brand-bg p-3 text-[12px] font-bold">{copy.home.typeLocation}</button>
-                    <button onClick={() => setLocationOpen(true)} className="rounded-xl bg-brand-bg p-3 text-[12px] font-bold">{copy.home.pickMap}</button>
+                    <button onClick={() => openLocation("gps")} className="rounded-xl bg-brand-bg p-3 text-[12px] font-bold">{copy.home.useGps}</button>
+                    <button onClick={() => openLocation("search")} className="rounded-xl bg-brand-bg p-3 text-[12px] font-bold">{copy.home.typeLocation}</button>
+                    <button onClick={() => openLocation("map")} className="rounded-xl bg-brand-bg p-3 text-[12px] font-bold">{copy.home.pickMap}</button>
                   </div>
                   {location ? <p className="mt-2 text-[11px] text-brand-muted">📍 {location.label}</p> : null}
                 </div>
@@ -626,7 +632,7 @@ export default function App() {
 
       </div>
 
-      <LocationModal open={locationOpen} onClose={() => setLocationOpen(false)} onChoose={chooseLocation} />
+      <LocationModal open={locationOpen} onClose={() => setLocationOpen(false)} onChoose={chooseLocation} initialMode={locationMode} />
       <Sheet open={mapOpen} onClose={() => setMapOpen(false)} title={copy.stores.map} wide>
         <div className="h-[70vh] min-h-[360px]">
           <MapView

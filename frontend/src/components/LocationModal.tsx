@@ -23,10 +23,12 @@ export function LocationModal({
   open,
   onClose,
   onChoose,
+  initialMode = "options",
 }: {
   open: boolean;
   onClose: () => void;
   onChoose: (location: SlotLocation) => void;
+  initialMode?: "options" | "gps" | "search" | "map";
 }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<GeoSuggestion[]>([]);
@@ -56,6 +58,7 @@ export function LocationModal({
     setSelected(location);
     setError(null);
     onChoose(location);
+    setMapOpen(false);
     onClose();
   };
 
@@ -91,6 +94,15 @@ export function LocationModal({
   const selectMapPoint = (lat: number, lon: number) => {
     setSelected({ label: copy.home.selectedMapPoint, lat, lon });
   };
+
+  useEffect(() => {
+    if (!open) return;
+    if (initialMode === "gps") useGps();
+    if (initialMode === "map") setMapOpen(true);
+    if (initialMode === "search") window.setTimeout(() => document.getElementById("hood-search")?.focus(), 0);
+  // The initial mode is an instruction for this opening only.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, initialMode]);
 
   return (
     <Sheet open={open} onClose={onClose} title={copy.home.location}>
