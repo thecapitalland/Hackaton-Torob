@@ -5,7 +5,7 @@ from __future__ import annotations
 import operator
 from typing import Annotated, Literal, Optional, TypedDict
 
-Phase = Literal["discover", "recommend", "stores", "verify", "trip", "done", "out_of_catalog"]
+Phase = Literal["discover", "recommend", "stores", "verify", "trip", "done", "out_of_catalog", "compare"]
 Action = Literal["chat", "select_product", "verify", "trip"]
 
 
@@ -24,6 +24,9 @@ class Slots(TypedDict, total=False):
     installment: bool
     today: bool
     in_torob: bool
+    # P3: «X یا Y کدوم بهتره؟» — the two sides of a comparison request,
+    # present only on the turn that asks for it
+    compare: Optional[list]
 
 
 class Card(TypedDict, total=False):
@@ -104,6 +107,7 @@ class AgentState(TypedDict, total=False):
     draft_targets: list[dict]
     specialty_market: Optional[dict]
     ooc: Optional[dict]
+    compare: Optional[dict]
     trip: Optional[dict]
     trace: Annotated[list[dict], operator.add]
     phase: Phase

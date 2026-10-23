@@ -46,6 +46,56 @@ UNIT_MULTIPLIERS = {
     "م": 1_000_000,
 }
 
+# words that are question/shopping filler, never a product term
+_COMPARE_FILLERS = {
+    "میخوام",
+    "می خواهم",
+    "میخواهم",
+    "بخرم",
+    "بخر",
+    "خرید",
+    "کدوم",
+    "کدام",
+    "بهتره",
+    "بهتر است",
+    "بهتر",
+    "دیگه",
+    "دیگر",
+    "چی",
+    "چیه",
+    "چه",
+    "هر",
+    "یک",
+    "یه",
+    "برای",
+    "من",
+    "رو",
+    "تو",
+    "حتما",
+    "لطفا",
+    "قیمت",
+    "قیمتش",
+    "دو",
+    "با",
+    "و",
+    "از",
+    "در",
+    "است",
+    "هست",
+    "هس",
+    "؟",
+}
+
+# hints (normalized) that a listing may be a replica / «درجه یک» copy
+_REPLICA_HINTS = (
+    "کپی",
+    "ریپلیکا",
+    "کی دی",
+    "replica",
+    "فیک",
+    "درجه",
+)
+
 
 def _number(value: str) -> float:
     return float(value.replace(",", "").replace("٫", ".").replace("٬", ""))
@@ -560,3 +610,52 @@ def ooc_message(query: str, market_name: str | None = None) -> str:
             "آنجا معمولاً چند فروشندهٔ تخصصی هست."
         )
     return f"«{query}» را در داده‌های ترب پیدا نکردم."
+
+
+# --------------------------------------------------------------------------
+# compare («X یا Y کدوم بهتره؟»)
+# --------------------------------------------------------------------------
+
+
+def _compare_side(term: str) -> str:
+    tokens = re.findall(r"[^\W_]+", term, flags=re.UNICODE)
+    words = [word for word in tokens if word not in _COMPARE_FILLERS]
+    # keep the tail: «کدوم بهتره گوشی سامسونگ» -> «گوشی سامسونگ»
+    return " ".join(words[:3]) if words else ""
+
+
+def extract_compare(text: str) -> list[str] | None:
+    """Detect «X یا Y کدوم بهتره», «X بهتره یا Y», «X یا Y» in one message.
+
+    Returns ``[term_a, term_b]`` or ``None``.  The generic «X یا Y» only
+    counts on short queries without shopping verbs, so normal («هدفون R50i
+    میخوام») queries never false-positive on a random «یا».
+    """
+    if not text or "یا" not in text:
+        return None
+    normalized = normalize(f" {text} ").strip()
+    if "یا" not in normalized:
+        return None
+
+    explicit = any(word in normalized for word in ("بهتر", "کدوم", "کدام", "فرق"))
+    verb_hit = any(word in normalized for word in ("میخوام", "می خواهم", "بخرم", "قیمت", "چیه", "چی هست", "چیزی"))
+    words = [w for w in re.findall(r"[^\W_]+", normalized, flags=re.UNICODE)]
+    if not explicit and (verb_hit or len(words) > 6):
+        return None
+
+    parts = re.split(r"\s+یا\s+", normalized.strip(" ؟.!."))
+    if len(parts) < 2:
+        return None
+    side_a = _compare_side(parts[0])
+    side_b = _compare_side(parts[1])
+    if not side_a or not side_b or side_a == side_b:
+        return None
+    return [side_a, side_b]
+
+
+def replica_flag(text: str) -> bool:
+    """True when a product title hints at a replica / «درجه یک» copy."""
+    if not text:
+        return False
+    normalized = normalize(text)
+    return any(hint in normalized for hint in _REPLICA_HINTS)

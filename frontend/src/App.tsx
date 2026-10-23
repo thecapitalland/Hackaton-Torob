@@ -6,6 +6,7 @@ import { faDigits, formatPrice } from "./format";
 import { shopsInMarket } from "./lib/market";
 import type {
   ApiResponse,
+  Compare,
   Followup,
   Market,
   Message,
@@ -24,6 +25,7 @@ import { SlotPills, TypingIndicator } from "./components/Chat";
 import { ProductCards } from "./components/ProductCards";
 import { MarketCard } from "./components/MarketCard";
 import { OutOfCatalogCard } from "./components/OutOfCatalogCard";
+import { CompareCard } from "./components/CompareCard";
 import { StoresSection, type SortKey } from "./components/Stores";
 import { PermissionSheet } from "./components/PermissionSheet";
 import { Inbox } from "./components/Inbox";
@@ -50,6 +52,7 @@ export default function App() {
   const [market, setMarket] = useState<Market | null>(null);
   const [marketFilter, setMarketFilter] = useState<Market | null>(null);
   const [ooc, setOoc] = useState<Ooc | null>(null);
+  const [compare, setCompare] = useState<Compare | null>(null);
   const [product, setProduct] = useState<Product | null>(null);
   const [shops, setShops] = useState<Shop[]>([]);
   const [followups, setFollowups] = useState<Followup[]>([]);
@@ -86,7 +89,7 @@ export default function App() {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messages.length, cards.length, shops.length, followups.length, trip, ooc]);
+  }, [messages.length, cards.length, shops.length, followups.length, trip, ooc, compare]);
 
   const applyResponse = useCallback((response: ApiResponse) => {
     if (response.messages?.length) {
@@ -104,6 +107,15 @@ export default function App() {
     if (response.mode === "out_of_catalog") {
       setCards([]);
       setMore([]);
+    }
+    if (response.phase === "compare") {
+      setCompare(response.compare ?? null);
+      // a comparison turn must not show a stale product feed or market banner
+      setCards([]);
+      setMore([]);
+      setMarket(null);
+    } else if (response.phase) {
+      setCompare(null);
     }
     if (response.product !== undefined) setProduct(response.product ?? null);
     if (response.shops) setShops(response.shops);
@@ -493,7 +505,7 @@ export default function App() {
                   />
                 ) : null}
 
-                {market && !ooc ? (
+                {market && !ooc && !compare ? (
                   <MarketCard
                     market={market}
                     filterActive={marketFilter?.market_id === market.market_id}
@@ -506,6 +518,8 @@ export default function App() {
                 ) : null}
 
                 {ooc ? <OutOfCatalogCard ooc={ooc} onPickAlternative={selectProduct} /> : null}
+
+                {compare ? <CompareCard compare={compare} onPickSide={selectProduct} /> : null}
 
                 {shops.length ? (
                   <StoresSection

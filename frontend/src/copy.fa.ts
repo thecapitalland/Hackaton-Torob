@@ -171,6 +171,21 @@ export const copy = {
     send: "ارسال",
     simulator: "شبیه‌سازی‌شده",
   },
+
+  compare: {
+    verdictLabel: "تصمیم با تو",
+    models: "مدل",
+    shops: "فروشگاه",
+    near: "نزدیک تا ۵ کیلومتر",
+    range: "بازهٔ قیمت",
+    median: "میانه",
+    tapSide: "برای دیدن فروشگاه‌ها، روی یکی از دو طرف بزن",
+    replicaWarning:
+      "در عنوان یک طرف نشانهٔ «کپی/درجه یک» دیده می‌شود؛ قبل از پرداخت اصالت را حضوری چک کن.",
+    replicaNote: "احتیاط: احتمال کپی/درجه یک",
+    checklistTitle: "چیزی که حضوری چک کنی",
+    notEnough: "دادهٔ کافی برای مقایسه پیدا نکردم.",
+  },
 };
 
 export type Copy = typeof copy;

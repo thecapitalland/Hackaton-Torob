@@ -1,6 +1,7 @@
 export type Phase =
   | "discover"
   | "recommend"
+  | "compare"
   | "stores"
   | "verify"
   | "trip"
@@ -247,6 +248,32 @@ export interface Ooc {
   market?: Market | null;
 }
 
+export interface CompareSide {
+  label: string;
+  n_models: number;
+  n_shops: number;
+  n_near: number;
+  min: number;
+  max: number;
+  median: number;
+  replica: boolean;
+  best?: {
+    product_id: string;
+    title?: string;
+    min_price?: number;
+    n_shops?: number;
+  } | null;
+}
+
+export interface Compare {
+  title: string;
+  sides: CompareSide[];
+  verdict: string;
+  verdict_label: string;
+  warning?: string | null;
+  checklist: string[];
+}
+
 export interface Product {
   product_id: string;
   persian_title: string;
@@ -316,6 +343,7 @@ export interface ApiResponse {
   more?: MoreItem[];
   specialty_market?: Market | null;
   ooc?: Ooc;
+  compare?: Compare | null;
   mode?: string;
   product?: Product | null;
   shops?: Shop[];

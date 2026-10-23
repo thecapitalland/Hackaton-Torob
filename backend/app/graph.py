@@ -38,6 +38,7 @@ from .normalize import (
 from .state import AgentState
 from .tools import catalog, haggle, markets, ooc, ranking, seller_sim
 from .tools.cafes import nearest_cafe
+from .tools.geo import haversine_m
 from .tools.hours import now_tehran
 from .tools.markets import (
     balad_link,
@@ -71,6 +72,7 @@ class UnderstandOut(BaseModel):
     installment: bool | None = None
     today: bool | None = None
     in_torob: bool | None = None
+    compare: list[str] | None = None
 
 
 class ClarifyOut(BaseModel):
@@ -110,6 +112,11 @@ class OocOut(BaseModel):
 
 class HaggleOut(BaseModel):
     lines: list[str] = Field(default_factory=list)
+
+
+class CompareOut(BaseModel):
+    verdict: str = ""
+    checklist: list[str] = Field(default_factory=list)
 
 
 # --------------------------------------------------------------------------
@@ -230,6 +237,7 @@ def _rule_extract(text: str) -> dict:
         "installment": rules.detect_installment(text),
         "today": rules.detect_today(text),
         "in_torob": rules.detect_in_torob(text),
+        "compare": rules.extract_compare(text),
     }
 
 
@@ -322,6 +330,15 @@ def understand(state: AgentState) -> dict:
         slots["category"] = None
     slots["keywords"] = _clean_keywords(slots.get("keywords"), slots.get("location"))
 
+    # P3: the «X یا Y کدوم بهتره» comparison is per-turn state.  A pair found
+    # now routes to the compare node; any later normal query clears it so the
+    # session returns to the regular shopping flow.
+    pair = extracted.get("compare") or rules.extract_compare(text)
+    if isinstance(pair, list) and len(pair) == 2 and pair[0] and pair[1] and pair[0] != pair[1]:
+        slots["compare"] = [str(pair[0]), str(pair[1])]
+    elif "compare" in slots:
+        slots.pop("compare", None)
+
     asked = int(state.get("asked") or 0)
     missing = _compute_missing(slots, asked)
 
@@ -339,6 +356,12 @@ def understand(state: AgentState) -> dict:
     return {
         "slots": slots,
         "missing": missing,
+        # the phase must not leak from the previous turn: a question or search
+        # turn starts from "discover" again (the compare node sets "compare"
+        # right after, whenever a pair was found this turn).  A stale
+        # comparison card from an earlier turn must not ride along either.
+        "phase": "discover",
+        "compare": None,
         "trace": [_trace("understand", summary, started)],
     }
 
@@ -770,6 +793,228 @@ def out_of_catalog(state: AgentState) -> dict:
         "phase": "out_of_catalog",
         "messages": [{"role": "assistant", "content": message_fa}],
         "trace": [_trace("out_of_catalog", f"«{query}» در داده‌ها نبود", started)],
+    }
+
+
+# --------------------------------------------------------------------------
+# node: compare («X یا Y کدوم بهتره؟», P3)
+# --------------------------------------------------------------------------
+
+COMPARE_MAX_MODELS = 8
+COMPARE_NEAR_M = 5_000
+
+_REPLICA_WARNING = "در عنوان یک طرف نشانهٔ «کپی/درجه یک» دیده می‌شود؛ قبل از پرداخت اصالت را حضوری چک کن."
+
+_DEFAULT_CHECKLIST = [
+    "فاکتور رسمی با مهر فروشگاه بگیر",
+    "گارانتی یا هولوگرام اصالت را چک کن",
+    "کالا را حضوری تست کن و با نمونهٔ مغازه‌های کنار هم مقایسه کن",
+]
+
+
+def _compare_side_data(term: str, slots: dict) -> dict:
+    """Aggregate real catalog data for one side of the comparison."""
+    keywords = [word for word in normalize(term).split() if word]
+    category = rules.detect_category(term)
+    budget_max = slots.get("budget_max")
+    budget_min = slots.get("budget_min")
+
+    products = catalog.search_products(
+        keywords, category, budget_max, budget_min, limit=40, min_shops=2, match_mode="all"
+    )
+    if not products:
+        products = catalog.search_products(
+            keywords, None, budget_max, budget_min, limit=40, min_shops=2, match_mode="any"
+        )
+
+    location = slots.get("location") or {}
+    user_lat = location.get("lat")
+    user_lon = location.get("lon")
+
+    pseudo: list[dict] = []
+    shops: set = set()
+    near: set = set()
+    titles: list[str] = []
+    replica = False
+    best: dict | None = None
+
+    for product in products[:COMPARE_MAX_MODELS]:
+        title = product.get("persian_title") or ""
+        if rules.replica_flag(title):
+            replica = True
+        titles.append(title)
+        if (
+            best is None
+            or product.get("n_shops", 0) > best.get("n_shops", 0)
+            or (
+                product.get("n_shops", 0) == best.get("n_shops", 0)
+                and (product.get("min_price") or 0) < (best.get("min_price") or 0)
+            )
+        ):
+            best = product
+        for offer in catalog.get_offers_for_product(product["product_id"]):
+            price = int(offer.get("price_toman") or 0)
+            shop_id = offer.get("shop_id")
+            if not price or not shop_id:
+                continue
+            pseudo.append(
+                {
+                    "price_toman": price,
+                    "shop_id": shop_id,
+                    "lat": offer.get("lat"),
+                    "lon": offer.get("lon"),
+                }
+            )
+            shops.add(shop_id)
+            if user_lat is not None and user_lon is not None:
+                distance = haversine_m(user_lat, user_lon, offer.get("lat"), offer.get("lon"))
+                if distance is not None and distance <= COMPARE_NEAR_M:
+                    near.add(shop_id)
+
+    stats = haggle.price_stats(pseudo)
+    best_payload = None
+    if best:
+        best_payload = {
+            "product_id": best.get("product_id"),
+            "title": best.get("persian_title"),
+            "min_price": best.get("min_price"),
+            "n_shops": best.get("n_shops"),
+        }
+    return {
+        "label": term,
+        "n_models": min(len(products), COMPARE_MAX_MODELS),
+        "n_shops": stats["n_shops"],
+        "n_near": len(near),
+        "min": stats["min"],
+        "max": stats["max"],
+        "median": stats["median"],
+        "replica": replica,
+        "titles_sample": titles[:3],
+        "best": best_payload,
+    }
+
+
+def _compare_verdict_template(side_a: dict, side_b: dict) -> str:
+    """Deterministic verdict, labeled «تصمیم با تو»; used when the LLM is off
+    or its numbers do not validate."""
+    sides = [side for side in (side_a, side_b) if side["n_shops"]]
+    if not sides:
+        return (
+            "برای هیچ‌کدام از این دو عبارت عرضه‌ای در داده‌های ترب پیدا نکردم؛ "
+            "با یک نام دقیق‌تر دوباره امتحان کن."
+        )
+    if len(sides) < 2:
+        solo = sides[0]
+        other = side_b if solo is side_a else side_a
+        return (
+            f"برای «{other['label']}» در داده‌های ترب عرضه‌ای پیدا نکردم. "
+            f"«{solo['label']}» با {fa_digits(str(solo['n_shops']))} فروشگاه و "
+            f"میانهٔ {rules.price_fa(solo['median'])} تومان در دسترس است. تصمیم با تو."
+        )
+
+    cheaper, dearer = sorted(
+        (side_a, side_b), key=lambda side: side["median"] or 10**15
+    )
+    parts: list[str] = []
+    if cheaper["median"] != dearer["median"]:
+        parts.append(
+            f"برای قیمت، «{cheaper['label']}» به‌صرفه‌تره (میانهٔ {rules.price_fa(cheaper['median'])} "
+            f"تومان در {fa_digits(str(cheaper['n_shops']))} فروشگاه، در برابر "
+            f"{rules.price_fa(dearer['median'])} تومان در {fa_digits(str(dearer['n_shops']))} فروشگاه)."
+        )
+    else:
+        parts.append(
+            f"میانهٔ قیمت هر دو شبیه هم است ({rules.price_fa(cheaper['median'])} تومان)."
+        )
+    if cheaper["n_shops"] < dearer["n_shops"]:
+        parts.append(
+            f"ولی «{dearer['label']}» انتخاب بیشتری می‌ده "
+            f"({fa_digits(str(dearer['n_shops']))} فروشگاه در برابر "
+            f"{fa_digits(str(cheaper['n_shops']))})."
+        )
+    if side_a["n_near"] != side_b["n_near"]:
+        closer = max((side_a, side_b), key=lambda side: side["n_near"])
+        if closer["n_near"]:
+            parts.append(
+                f"نزدیک به تو هم «{closer['label']}» با "
+                f"{fa_digits(str(closer['n_near']))} فروشگاه در ۵ کیلومتری گزینه‌های بیشتری دارد."
+            )
+    parts.append("تصمیم با تو: بسته به اینکه قیمت برات مهم‌تره یا تنوع و نزدیکی مسیر، یکی از این دو را انتخاب کن.")
+    return " ".join(parts)
+
+
+def _compare_side_payload(side: dict) -> dict:
+    return {
+        "label": side["label"],
+        "median_toman": side["median"],
+        "min_toman": side["min"],
+        "max_toman": side["max"],
+        "n_shops": side["n_shops"],
+        "n_models": side["n_models"],
+        "n_near_shops": side["n_near"],
+        "replica": side["replica"],
+        "titles_sample": side["titles_sample"],
+    }
+
+
+def compare(state: AgentState) -> dict:
+    started = time.time()
+    slots = state.get("slots") or {}
+    pair = slots.get("compare") or []
+    side_a = _compare_side_data(str(pair[0]), slots)
+    side_b = _compare_side_data(str(pair[1]), slots)
+
+    fallback_verdict = _compare_verdict_template(side_a, side_b)
+    fallback_checklist = list(_DEFAULT_CHECKLIST)
+    verdict, checklist = fallback_verdict, fallback_checklist
+
+    client = get_client()
+    payload = {
+        "a": _compare_side_payload(side_a),
+        "b": _compare_side_payload(side_b),
+        "replica": bool(side_a["replica"] or side_b["replica"]),
+    }
+    raw = client.chat_json(prompts.compare_messages(payload))
+    if raw:
+        try:
+            parsed = CompareOut(**raw)
+            candidate_verdict = parsed.verdict.strip()
+            candidate_checklist = [str(item).strip() for item in parsed.checklist if str(item).strip()]
+            # the LLM may only reuse numbers the tools computed
+            allowed = {
+                float(side[key])
+                for side in (side_a, side_b)
+                for key in ("min", "max", "median", "n_shops", "n_models", "n_near")
+            }
+            allowed.add(float(COMPARE_NEAR_M / 1_000))  # the «۵ کیلومتری» radius
+            text = " ".join([candidate_verdict, *candidate_checklist])
+            if candidate_verdict and candidate_checklist and haggle.numbers_in_text(text) <= allowed:
+                verdict = candidate_verdict
+                checklist = candidate_checklist[:4]
+        except (ValidationError, ValueError, TypeError):
+            pass
+
+    replica_hit = bool(side_a["replica"] or side_b["replica"])
+    payload_out = {
+        "title": f"مقایسهٔ {side_a['label']} و {side_b['label']}",
+        "sides": [side_a, side_b],
+        "verdict": verdict,
+        "verdict_label": "تصمیم با تو",
+        "warning": _REPLICA_WARNING if replica_hit else None,
+        "checklist": checklist,
+    }
+    message = f"مقایسهٔ «{side_a['label']}» و «{side_b['label']}» از روی داده‌های ترب آماده‌ست 👇"
+    return {
+        "compare": payload_out,
+        "phase": "compare",
+        "messages": [{"role": "assistant", "content": message}],
+        "trace": [
+            _trace(
+                "compare",
+                f"«{side_a['label']}» × «{side_b['label']}» ({side_a['n_shops']} و {side_b['n_shops']} فروشگاه)",
+                started,
+            )
+        ],
     }
 
 
@@ -1324,6 +1569,10 @@ def route_action(state: AgentState) -> str:
 
 
 def route_understand(state: AgentState) -> str:
+    # P3: an explicit «X یا Y کدوم بهتره» comparison short-circuits the
+    # question flow — compare works without budget/location slots.
+    if (state.get("slots") or {}).get("compare"):
+        return "compare"
     missing = state.get("missing") or []
     asked = int(state.get("asked") or 0)
     if missing and asked < MAX_QUESTIONS:
@@ -1344,6 +1593,7 @@ def build_graph(checkpointer=None) -> Any:
     graph.add_node("search", search)
     graph.add_node("recommend", recommend)
     graph.add_node("out_of_catalog", out_of_catalog)
+    graph.add_node("compare", compare)
     graph.add_node("find_stores", find_stores)
     graph.add_node("plan_contact", plan_contact)
     graph.add_node("approve_contact", approve_contact)
@@ -1368,7 +1618,7 @@ def build_graph(checkpointer=None) -> Any:
     graph.add_conditional_edges(
         "understand",
         route_understand,
-        {"clarify": "clarify", "search": "search"},
+        {"clarify": "clarify", "compare": "compare", "search": "search"},
     )
     graph.add_edge("clarify", "understand")
     graph.add_conditional_edges(
@@ -1378,6 +1628,7 @@ def build_graph(checkpointer=None) -> Any:
     )
     graph.add_edge("recommend", END)
     graph.add_edge("out_of_catalog", END)
+    graph.add_edge("compare", END)
     graph.add_edge("find_stores", END)
 
     graph.add_edge("plan_contact", "approve_contact")

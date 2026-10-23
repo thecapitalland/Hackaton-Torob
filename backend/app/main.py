@@ -340,6 +340,9 @@ async def chat(body: ChatIn) -> Any:
     if values.get("phase") == "out_of_catalog":
         payload["mode"] = "out_of_catalog"
         payload["ooc"] = values.get("ooc") or {}
+    if values.get("phase") == "compare":
+        payload["mode"] = "compare"
+        payload["compare"] = values.get("compare") or {}
     return payload
 
 
